@@ -1,0 +1,22 @@
+[Unit]
+Description=Oilfield Dashboard Web Backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=deploy
+Group=deploy
+EnvironmentFile=/etc/daylight/node.conf
+Environment=OILFIELD_DOMAIN=oilfield.parso.guru
+Environment=DASH_ORIGIN=https://dash.oilfield.parso.guru
+ExecStart=/opt/oilfield/bin/oilfield-dash-web
+Restart=always
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=oilfield-dash
+
+[Install]
+WantedBy=multi-user.target
