@@ -1,0 +1,14 @@
+[Unit]
+Description=Run oilfield-scraper every 5 minutes
+Documentation=https://github.com/parso/oilfield
+After=etcd.service
+Requires=etcd.service
+
+[Timer]
+OnBootSec=60s
+OnUnitActiveSec=5min
+AccuracySec=10s
+RandomizedDelaySec=15s
+
+[Install]
+WantedBy=timers.target

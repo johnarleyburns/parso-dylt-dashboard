@@ -1,0 +1,16 @@
+[Unit]
+Description=oilfield market data scraper (oneshot)
+Documentation=https://github.com/parso/oilfield
+After=network-online.target etcd.service
+Requires=etcd.service
+
+[Service]
+Type=oneshot
+User=deploy
+Group=deploy
+EnvironmentFile=/etc/daylight/node.conf
+Environment=ETCD_ENDPOINTS=http://127.0.0.1:2379
+ExecStart=/opt/oilfield/bin/oilfield-scraper
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=oilfield-scraper

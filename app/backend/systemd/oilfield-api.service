@@ -1,0 +1,22 @@
+[Unit]
+Description=oilfield REST API — energy market data
+Documentation=https://github.com/parso/oilfield
+After=network-online.target etcd.service
+Requires=etcd.service
+
+[Service]
+Type=simple
+User=deploy
+Group=deploy
+EnvironmentFile=/etc/daylight/node.conf
+Environment=ETCD_ENDPOINTS=http://127.0.0.1:2379
+Environment=API_ADDR=:8080
+ExecStart=/opt/oilfield/bin/oilfield-api
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=oilfield-api
+
+[Install]
+WantedBy=multi-user.target
