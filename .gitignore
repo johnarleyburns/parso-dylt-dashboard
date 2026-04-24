@@ -30,3 +30,13 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+*.swp
+
+# Node / frontend
+node_modules/
+dist/
+.npm/
+
+# Infra secrets and state
+infra/.env
+infra/state/
