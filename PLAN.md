@@ -63,16 +63,28 @@ The four Daylight Noble Truths applied throughout:
 
 ## 2. Provider Selection — The Four Nodes
 
-Chosen for: geographic diversity, no shared parent company, sub-$7/month entry VPS, API-driven provisioning, clean Ubuntu 24.04 LTS support.
+Chosen for: geographic diversity (no two nodes in the same region), no shared parent company, sub-$8/month entry VPS, API-driven provisioning, clean Ubuntu 24.04 LTS support.
 
 | # | Role | Provider | Plan | Est. Cost/mo | Region | Provisioning API |
 |---|------|----------|------|-------------|--------|-----------------|
-| **N1** | Runtime Node 1 | **Hetzner Cloud** | CX22 (2 vCPU, 4 GB RAM, 40 GB NVMe) | ~$4.15 | Ashburn, VA (US East) | Hetzner Cloud API |
-| **N2** | Runtime Node 2 | **IONOS** | VPS S (2 vCores, 2 GB RAM, 80 GB NVMe) | $3.00 | Newark, NJ (US East) | IONOS Cloud API |
-| **N3** | Runtime Node 3 | **Vultr** | Cloud Compute (1 vCPU, 1 GB RAM, 25 GB SSD) | $6.00 | Dallas, TX | Vultr API v2 |
-| **N4** | Control/Dashboard | **DigitalOcean** | Droplet Basic (1 vCPU, 1 GB RAM, 25 GB SSD) | $6.00 | New York, NY | DO API v2 |
+| **N1** | Runtime Node 1 | **Hetzner Cloud** | CX22 (2 vCPU, 4 GB RAM, 40 GB NVMe) | ~$4.15 | Ashburn, VA (**US East**) | Hetzner Cloud API |
+| **N2** | Runtime Node 2 | **Kamatera** | Cloud Server (1 vCPU, 2 GB RAM, 20 GB SSD) | ~$6.00 | Los Angeles, CA (**US West**) | Kamatera REST API |
+| **N3** | Runtime Node 3 | **Scaleway** | PLAY2-MICRO (1 vCPU, 2 GB RAM, 20 GB SSD) | ~$4.00 | Paris, FR (**Europe**) | Scaleway API v1 |
+| **N4** | Control/Dashboard | **UpCloud** | Cloud Server DEV-1SA (1 vCPU, 1 GB RAM, 10 GB MaxIOPS SSD) | ~$3.25 | Chicago, IL (**US Central**) | UpCloud API v3 |
+| **CF** | Dashboard Frontend | **Cloudflare Pages** | Free tier (static React build) | $0 | Global CDN | CF Pages API |
 
-**Total estimated cost: ~$19–21/month.**
+**Total estimated cost: ~$17.40/month.**
+
+### Geographic Distribution
+
+| Node | Region | Failure zone |
+|------|--------|-------------|
+| N1/Hetzner | US East (Ashburn, VA) | US East outage → N2 + N3 hold quorum |
+| N2/Kamatera | US West (Los Angeles, CA) | US West outage → N1 + N3 hold quorum |
+| N3/Scaleway | Europe (Paris, FR) | Europe outage → N1 + N2 hold quorum |
+| N4/UpCloud | US Central (Chicago, IL) | Control node down → runtime unaffected |
+
+No two nodes share a failure zone. A US East + Europe simultaneous outage leaves N2 (US West) serving in degraded read-only mode. No provider parent company is shared across any two nodes.
 
 ### Node Independence Guarantee
 
@@ -98,15 +110,17 @@ DNS is the Daylight load balancer. No cloud load balancer, no NGINX upstream poo
 ### 3.1 Domain Structure
 
 ```
-oilfield.parso.guru          A  → N1, N2, N3     (round-robin, 60s TTL — user-facing app)
-n1.oilfield.parso.guru       A  → N1 only         (300s TTL)
-n2.oilfield.parso.guru       A  → N2 only         (300s TTL)
-n3.oilfield.parso.guru       A  → N3 only         (300s TTL)
-ctrl.oilfield.parso.guru     A  → N4 only         (300s TTL)
-etcd.oilfield.parso.guru     A  → N1, N2, N3     (60s TTL — etcd peer discovery)
-api.oilfield.parso.guru      A  → N1, N2, N3     (60s TTL — Go REST API)
-dash.oilfield.parso.guru     A  → N4 only         (300s TTL — dashboard UI, Phase 5+)
+oilfield.parso.guru          A     → N1, N2, N3     (round-robin, 60s TTL — user-facing app)
+n1.oilfield.parso.guru       A     → N1 only         (300s TTL)
+n2.oilfield.parso.guru       A     → N2 only         (300s TTL)
+n3.oilfield.parso.guru       A     → N3 only         (300s TTL)
+ctrl.oilfield.parso.guru     A     → N4 only         (300s TTL — SSH deploy hub + dashboard Go API :8090)
+etcd.oilfield.parso.guru     A     → N1, N2, N3     (60s TTL — etcd peer discovery)
+api.oilfield.parso.guru      A     → N1, N2, N3     (60s TTL — Go REST API)
+dash.oilfield.parso.guru     CNAME → Cloudflare Pages (managed by CF — dashboard React frontend)
 ```
+
+> **Note:** `dash.oilfield.parso.guru` is a Cloudflare Pages custom domain — CF manages the CNAME automatically when you add the domain in the Pages project settings. Do not create this record manually in `dns.sh`; it will conflict.
 
 ### 3.2 DNS Provider
 
@@ -120,7 +134,7 @@ dash.oilfield.parso.guru     A  → N4 only         (300s TTL — dashboard UI, 
 |--------|-----|-----------|
 | Node-specific (`n1.`, `n2.`, `n3.`, `ctrl.`) | 300s | Stable; infrequent changes |
 | Cluster (`oilfield.`, `api.`, `etcd.`) | 60s | Fast failover if a node drops |
-| `dash.` | 300s | Single control node; no failover needed |
+| `dash.` | Managed by CF Pages | CNAME — Cloudflare controls TTL; global CDN edge |
 
 ---
 
@@ -133,9 +147,9 @@ oilfield/
 ├── infra/
 │   ├── provision/           # Per-provider provisioning scripts
 │   │   ├── hetzner.sh
-│   │   ├── ionos.sh
-│   │   ├── vultr.sh
-│   │   └── digitalocean.sh
+│   │   ├── ovhcloud.sh
+│   │   ├── scaleway.sh
+│   │   └── upcloud.sh
 │   ├── bootstrap/           # Post-provision node bootstrap
 │   │   ├── base.sh          # OS hardening, user setup, firewall
 │   │   ├── daylight.sh      # etcd + dylt CLI install + systemd units
@@ -193,8 +207,8 @@ oilfield/
            ┌───────────────────┼───────────────────┐
            ▼                   ▼                   ▼
     ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-    │  N1/Hetzner │    │  N2/IONOS   │    │  N3/Vultr   │
-    │  US East    │    │  US East    │    │  US Central │
+    │  N1/Hetzner │    │ N2/Kamatera │    │  N3/Scaleway│
+    │  US East    │    │  US West    │    │  Paris, EU  │
     │─────────────│    │─────────────│    │─────────────│
     │ etcd peer   │◄──►│ etcd peer   │◄──►│ etcd peer   │
     │ Go API :8080│    │ Go API :8080│    │ Go API :8080│
@@ -207,12 +221,12 @@ oilfield/
                                │ SSH deploy + dylt CLI
                                ▼
                     ┌─────────────────────┐
-                    │   N4/DigitalOcean   │
+                    │  N4/UpCloud Chicago │
                     │   ctrl.oilfield.    │
                     │─────────────────────│
                     │ dylt CLI (control)  │
                     │ CLI dashboard (P4)  │
-                    │ Web dashboard (P5+) │
+                    │ Dash backend (P5+)  │
                     │ etcd observer only  │
                     └─────────────────────┘
 ```
@@ -247,7 +261,7 @@ oilfield/
 /oilfield/nodes/{name}/heartbeat        RFC3339 — written every 30s by scraper
 /oilfield/nodes/{name}/status           "ok" | "degraded" | "offline"
 /oilfield/nodes/{name}/ip               current public IP
-/oilfield/nodes/{name}/provider         "hetzner" | "ionos" | "vultr" | "digitalocean"
+/oilfield/nodes/{name}/provider         "hetzner" | "kamatera" | "scaleway" | "upcloud"
 /oilfield/config/scrape_interval        seconds (default "300")
 /oilfield/config/active_node            node currently holding scrape lock
 ```
@@ -332,10 +346,11 @@ These are the only steps a human must perform. Everything after Phase 0 is agent
 | Provider | Actions Required |
 |----------|-----------------|
 | **Hetzner** | cloud.hetzner.com → Add payment → API Tokens → Create Read+Write → save as `HETZNER_API_TOKEN` |
-| **IONOS** | ionos.com → Add payment → Developer API → Generate key → save as `IONOS_API_KEY` |
-| **Vultr** | vultr.com → Add payment → Account → API → Enable → save as `VULTR_API_KEY` |
-| **DigitalOcean** | digitalocean.com → Add payment → API → Generate Token (read+write) → save as `DO_API_TOKEN` |
+| **Kamatera** | kamatera.com → Add payment → API → Create API Client → save Client ID as `KAMATERA_CLIENT_ID`, Secret as `KAMATERA_CLIENT_SECRET` |
+| **Scaleway** | scaleway.com → Add payment → IAM → API Keys → Generate key → save as `SCW_ACCESS_KEY` + `SCW_SECRET_KEY`; copy Project ID as `SCW_PROJECT_ID` |
+| **UpCloud** | upcloud.com → Add payment → API Tokens → Create token → name it `oilfield-deploy` → save token value as `UPCLOUD_API_TOKEN` |
 | **EIA** | eia.gov/opendata → Register (free, email required) → save as `EIA_API_KEY` |
+| **Cloudflare Pages** | Already in Cloudflare — Pages → Create project → name it `oilfield-dash` → add custom domain `dash.oilfield.parso.guru` (CF manages CNAME automatically) |
 
 ### MANUAL-2: SSH Key Generation
 
@@ -354,12 +369,18 @@ ssh-keygen -t ed25519 -C "oilfield-deploy" -f ~/.ssh/oilfield_ed25519
 ```bash
 # infra/.env — NEVER commit — add to .gitignore immediately
 HETZNER_API_TOKEN=
-IONOS_API_KEY=
-VULTR_API_KEY=
-DO_API_TOKEN=
+KAMATERA_CLIENT_ID=
+KAMATERA_CLIENT_SECRET=
+SCW_ACCESS_KEY=
+SCW_SECRET_KEY=
+SCW_PROJECT_ID=
+SCW_ZONE=fr-par-1
+UPCLOUD_API_TOKEN=
+UPCLOUD_ZONE=us-chi1
 EIA_API_KEY=
 CLOUDFLARE_API_TOKEN=
 CLOUDFLARE_ZONE_ID=
+CF_PAGES_PROJECT=oilfield-dash
 SSH_PUBLIC_KEY_PATH=~/.ssh/oilfield_ed25519.pub
 SSH_PRIVATE_KEY_PATH=~/.ssh/oilfield_ed25519
 DOMAIN=oilfield.parso.guru
@@ -395,6 +416,12 @@ This bash script:
 - Exits non-zero on any API error with a descriptive message to stderr
 Constraints: bash 5+, curl, jq. Daylight principle: simplest possible solution.
 ```
+
+> **Note on Kamatera provisioning:** Kamatera's REST API uses Bearer token auth — obtain a token via POST to `https://cloudcli.cloudwm.com/user/login` with `clientId` + `secret`, then use the token for server create/poll calls. Complexity similar to `hetzner.sh`. Target zone: `US-LA` (Los Angeles). Plan: 1 vCPU, 2 GB RAM, 20 GB SSD (type `B` standard).
+
+> **Note on Scaleway provisioning:** Scaleway's API is straightforward — Bearer token auth, clean REST endpoints at `api.scaleway.com/instance/v1`. The `scaleway.sh` script will be similar in complexity to `hetzner.sh`.
+
+> **Note on UpCloud provisioning:** UpCloud API v3 uses HTTP Basic Authentication (`UPCLOUD_USERNAME:UPCLOUD_PASSWORD`). Clean REST endpoints at `api.upcloud.com/1.3`. Comparable in complexity to `hetzner.sh`. SSH key upload and server creation are single POST requests.
 
 ---
 
@@ -623,10 +650,10 @@ OILFIELD CLUSTER STATUS  [2026-04-22 14:32:01 UTC]
 ═══════════════════════════════════════════════════
 NODE   PROVIDER    STATUS  HEARTBEAT    SCRAPE LOCK
 n1     Hetzner     ● OK    12s ago      —
-n2     IONOS       ● OK    18s ago      HELD (23s)   ← currently scraping
-n3     Vultr       ● OK     9s ago      —
+n2     Kamatera    ● OK    18s ago      HELD (23s)   ← currently scraping
+n3     Scaleway    ● OK     9s ago      —
 
-ETCD     Leader: n2 (IONOS)    Members: 3/3 healthy
+ETCD     Leader: n2 (Kamatera)    Members: 3/3 healthy
 
 LAST SCRAPE  n2  2026-04-22 14:30:03 UTC  (118s ago)  35 products  4 news items
 
@@ -658,11 +685,25 @@ oilfield-dash watch           # Auto-refresh every 10s
 
 ## 12. Phase 5 — Agentic: Web Dashboard (Read-Only)
 
-Web UI on N4 at `dash.oilfield.parso.guru`. Read-only.
+Hybrid architecture: Cloudflare Pages serves the static frontend globally; a Go backend on N4 aggregates cluster data.
 
-**Backend** (`dashboard/web/backend/main.go`): Go HTTP on `:8090`. Aggregates from all three node `/api/v1/health` endpoints; proxies prices and news from whichever runtime node responds first.
+### Architecture
 
-**Frontend**: React 18. Node health grid (green/yellow/red). Embedded `EnergyCurve3D` component. News panel. Auto-refresh every 30s.
+```
+dash.oilfield.parso.guru   →  Cloudflare Pages (global CDN, free)
+                                    │ fetch/XHR API calls
+                                    ▼
+ctrl.oilfield.parso.guru:443 → nginx → Go backend :8090 (N4/UpCloud)
+                                    │ reads
+                                    ▼
+                              N1/N2/N3 /api/v1/health + /api/v1/prices/all
+```
+
+**Backend** (`dashboard/web/backend/main.go`): Go HTTP on `:8090`. Aggregates from all three runtime node `/api/v1/health` endpoints; proxies prices and news from whichever runtime node responds first. CORS configured to allow `https://dash.oilfield.parso.guru`. nginx on N4 terminates TLS for `ctrl.oilfield.parso.guru` and proxies to `:8090`.
+
+**Frontend** (`dashboard/web/frontend/`): React 18. Deployed to Cloudflare Pages project `oilfield-dash`. Custom domain `dash.oilfield.parso.guru` added in CF Pages settings (CF manages the CNAME automatically). Node health grid (green/yellow/red). Embedded `EnergyCurve3D` component. News panel. Auto-refresh every 30s. All API calls go to `https://ctrl.oilfield.parso.guru`.
+
+**Deployment:** `wrangler pages deploy dashboard/web/frontend/dist --project-name oilfield-dash`. Uses `CLOUDFLARE_API_TOKEN` already in `infra/.env`. N4 runs no static file serving — nginx on N4 only proxies the Go backend.
 
 ---
 
@@ -695,7 +736,7 @@ oilfield/
 ├── infra/
 │   ├── .env                 # gitignored
 │   ├── state/               # gitignored: *.ip files
-│   ├── provision/           # hetzner.sh, ionos.sh, vultr.sh, digitalocean.sh
+│   ├── provision/           # hetzner.sh, kamatera.sh, scaleway.sh, upcloud.sh
 │   ├── bootstrap/           # base.sh, daylight.sh, dns.sh, tls.sh
 │   ├── deploy/              # deploy-app.sh, deploy-dash.sh
 │   └── teardown/teardown-all.sh
@@ -746,7 +787,7 @@ oilfield/
 
 **Section 4: What the Agent Got Right** — All four provision scripts (nearly verbatim), all systemd unit files, nginx config, EIA API v2 client, RSS news parser, etcd client helpers (once given the correct lease pattern), CLI dashboard table layout.
 
-**Section 5: The Numbers** — $21/month vs. $240/month. 4-node, 3-provider-redundant, full energy market coverage. Any two nodes can fail. Zero vendor lock-in. The Daylight thesis proven numerically.
+**Section 5: The Numbers** — $17.40/month vs. $240/month. 4-node, 4-provider infrastructure across 4 geographic regions (Hetzner/US-East, Kamatera/US-West, Scaleway/Europe, UpCloud/US-Central) plus Cloudflare Pages CDN at $0. No two nodes share a failure zone. Full energy market coverage. Any two runtime nodes can fail. Dashboard frontend served globally from Cloudflare edge — zero origin load for static assets. Zero vendor lock-in. The Daylight thesis proven numerically.
 
 ---
 
@@ -754,16 +795,17 @@ oilfield/
 
 | ID | Phase | Step | Time |
 |----|-------|------|------|
-| MANUAL-1 | Phase 0 | Create accounts + billing (4 providers + EIA) | 45–90 min |
+| MANUAL-1 | Phase 0 | Create accounts + billing (Hetzner, Kamatera, Scaleway, UpCloud + EIA) | 45–90 min |
 | MANUAL-2 | Phase 0 | Generate SSH keypair | 2 min |
-| MANUAL-3 | Phase 0 | Cloudflare account + nameserver transfer | 15–30 min |
+| MANUAL-3 | Phase 0 | Cloudflare API token + Zone ID (nameservers already transferred) | 5 min |
+| MANUAL-3b | Phase 0 | Create Cloudflare Pages project `oilfield-dash`, add custom domain `dash.oilfield.parso.guru` | 5 min |
 | MANUAL-4 | Phase 0 | Create `infra/.env` | 10 min |
-| DNS-1 | Phase 0 | Nameserver propagation wait | up to 24h |
+| DNS-1 | Phase 0 | Nameserver propagation — **already done** (`parso.guru` is in Cloudflare) | 0 min |
 | EIA-1 | Phase 0 | Register for free EIA API key | 2 min |
 | SCHEMA-1 | Pre-Phase 3 | Review + approve `docs/etcd-schema.md` | 20 min |
 | SECURITY-1 | Pre-Phase 6 | Configure etcd RBAC roles | 45 min |
 
-**Total active human time: ~3 hours (excluding propagation wait)**
+**Total active human time: ~2.5 hours (nameserver propagation wait eliminated)**
 **Everything else: agentic**
 
 ---
@@ -773,16 +815,17 @@ oilfield/
 | Node | Provider | Plan | Cost/mo |
 |------|----------|------|---------|
 | N1 — Runtime | Hetzner CX22 | 2 vCPU / 4 GB / 40 GB NVMe | ~$4.15 |
-| N2 — Runtime | IONOS VPS S | 2 vCore / 2 GB / 80 GB NVMe | $3.00 |
-| N3 — Runtime | Vultr Cloud Compute | 1 vCPU / 1 GB / 25 GB SSD | $6.00 |
-| N4 — Control | DigitalOcean Basic | 1 vCPU / 1 GB / 25 GB SSD | $6.00 |
+| N2 — Runtime | Kamatera Cloud Server | 1 vCPU / 2 GB / 20 GB SSD | ~$6.00 |
+| N3 — Runtime | Scaleway PLAY2-MICRO | 1 vCPU / 2 GB / 20 GB SSD | ~$4.00 |
+| N4 — Control | UpCloud DEV-1SA | 1 vCPU / 1 GB / 10 GB MaxIOPS SSD | ~$3.25 |
+| Dashboard Frontend | Cloudflare Pages | Global CDN, static React build | $0 |
 | DNS | Cloudflare | Free tier | $0 |
 | TLS | Let's Encrypt | Free | $0 |
 | EIA API | EIA OpenData | Free | $0 |
-| **TOTAL** | | | **~$19.15/mo** |
+| **TOTAL** | | | **~$17.40/mo** |
 
-**AWS equivalent** (EC2 t3.small ×3 + RDS Multi-AZ + ALB + ElastiCache + CloudWatch): ~$230–260/month.
-**Savings: ~92%. Vendor lock-in: zero.**
+**AWS equivalent** (EC2 t3.small ×3 + RDS Multi-AZ + ALB + ElastiCache + CloudWatch + CloudFront): ~$230–260/month.
+**Savings: ~93%. Vendor lock-in: zero.**
 
 ---
 
