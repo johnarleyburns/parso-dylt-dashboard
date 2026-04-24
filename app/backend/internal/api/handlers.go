@@ -7,17 +7,25 @@ import (
 	"strings"
 	"time"
 
-	"oilfield/internal/etcdstore"
 	"oilfield/internal/scraper"
 )
 
+// Store is the etcd access surface required by the API handlers.
+// etcdstore.Client satisfies this interface; tests can use a mock.
+type Store interface {
+	Get(ctx context.Context, key string) (string, error)
+	GetJSON(ctx context.Context, key string, dest any) error
+	GetWithPrefix(ctx context.Context, prefix string) (map[string]string, error)
+	IsHealthy(ctx context.Context) bool
+}
+
 type Server struct {
-	store    *etcdstore.Client
+	store    Store
 	nodeName string
 	provider string
 }
 
-func NewServer(store *etcdstore.Client, nodeName, provider string) *Server {
+func NewServer(store Store, nodeName, provider string) *Server {
 	return &Server{store: store, nodeName: nodeName, provider: provider}
 }
 
