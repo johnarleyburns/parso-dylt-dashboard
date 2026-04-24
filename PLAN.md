@@ -857,6 +857,101 @@ Doubling all products, adding 5 more news sources, extending forward curves to 3
 
 ---
 
+---
+
+## 16. Phase 7 — Systems Test (Human-Run Runbook)
+
+End-to-end validation from bare metal to live dashboard. All steps use scripts built in Phases 1–6.
+
+### 16.1 Provision (Phase 1 scripts)
+
+```bash
+./infra/provision/hetzner.sh   # → infra/state/hetzner.ip  (N1, US-East)
+./infra/provision/kamatera.sh  # → infra/state/kamatera.ip (N2, US-West)
+./infra/provision/scaleway.sh  # → infra/state/scaleway.ip (N3, Europe)
+./infra/provision/upcloud.sh   # → infra/state/upcloud.ip  (N4, US-Central)
+```
+
+### 16.2 Bootstrap (Phase 2 scripts)
+
+base.sh is called automatically by each provision script. After all four IPs exist:
+
+```bash
+# daylight.sh requires all 3 runtime IPs — run after all provision scripts complete
+N1_IP=$(cat infra/state/hetzner.ip)
+N2_IP=$(cat infra/state/kamatera.ip)
+N3_IP=$(cat infra/state/scaleway.ip)
+
+for IP in $N1_IP $N2_IP $N3_IP; do
+  ssh -i ~/.ssh/oilfield_ed25519 deploy@$IP \
+    "N1_IP=$N1_IP N2_IP=$N2_IP N3_IP=$N3_IP bash -s" < infra/bootstrap/daylight.sh
+done
+
+# DNS — run once from local machine after all IPs are available
+./infra/bootstrap/dns.sh
+
+# TLS — run on each node (Let's Encrypt requires domain to resolve first)
+ADMIN_EMAIL=john@parso.guru
+for NODE in n1 n2 n3 ctrl; do
+  ssh deploy@${NODE}.oilfield.parso.guru 'ADMIN_EMAIL=john@parso.guru bash -s' < infra/bootstrap/tls.sh
+done
+```
+
+### 16.3 Deploy (Phase 5 scripts)
+
+```bash
+./infra/deploy/deploy-app.sh all   # cross-compile api+scraper → scp → restart on N1/N2/N3
+./infra/deploy/deploy-dash.sh      # Go backend → N4; React frontend → Cloudflare Pages
+```
+
+### 16.4 Verify — CLI Dashboard
+
+```bash
+export OILFIELD_DOMAIN=oilfield.parso.guru
+go run ./dashboard/cli/... status    # Expect: n1/n2/n3 ● OK, prices populated
+go run ./dashboard/cli/... nodes     # Expect: heartbeats <60s ago
+go run ./dashboard/cli/... prices crude  # Expect: WTI, Brent, TOCOM prices
+go run ./dashboard/cli/... news      # Expect: EIA + IEA headlines
+go run ./dashboard/cli/... watch     # Expect: auto-refresh every 10s
+```
+
+### 16.5 Verify — Web Dashboard
+
+```
+open https://dash.oilfield.parso.guru
+```
+
+Expected: NodeHealthGrid shows n1/n2/n3 green, 3D energy chart renders with curves per product, NewsPanel shows news, sector toggles work, admin panel (gear icon) accessible with ADMIN_TOKEN.
+
+### 16.6 Verify — Price App
+
+```
+open https://oilfield.parso.guru
+```
+
+Expected: React app served by nginx from N1/N2/N3 round-robin, 3D chart interactive, prices updating.
+
+### 16.7 Verify — Admin Panel (Phase 6)
+
+In `dash.oilfield.parso.guru`:
+1. Click gear icon → enter `$ADMIN_TOKEN`
+2. Click "Force Scrape Now" → lock clears within 2s → next scraper run starts
+3. Set interval to 600 → Save → confirm `oilfield-dash nodes` shows new interval
+4. Click N1 Restart → confirm N1 services restart, rejoin within 30s
+
+### 16.8 Pass/Fail Criteria
+
+| Check | Pass |
+|-------|------|
+| `oilfield-dash status` | n1 ● OK, n2 ● OK, n3 ● OK |
+| `oilfield-dash prices crude` | ≥ 2 price points with real USD values |
+| `dash.oilfield.parso.guru` loads | 3D chart renders, no console errors |
+| Force Scrape via admin | Lock clears within 2s |
+| etcd quorum survives N1 restart | `oilfield-dash status` recovers within 30s |
+| Total monthly cost | ≤ $17.40/mo (see Appendix B) |
+
+---
+
 *End of PLAN.md — Parso Consulting / oilfield project*
-*Revision 2: etcd-only architecture, no PostgreSQL, full energy sector coverage including oil, gas, LNG, LPG, NGLs, electricity, refined products, and news*
+*Revision 3: added Phase 6 state-changing ops, Phase 7 Systems Test runbook*
 *Last updated: April 2026*

@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func serveJSON(v any) http.HandlerFunc {
@@ -21,6 +23,38 @@ func readBody(t *testing.T, resp *httptest.ResponseRecorder) string {
 	t.Helper()
 	b, _ := io.ReadAll(resp.Body)
 	return string(b)
+}
+
+// mockEtcd returns an httptest server that accepts etcd HTTP gateway POSTs.
+// The handler records the last path and body received.
+func mockEtcd(t *testing.T) (*httptest.Server, *string, *string) {
+	t.Helper()
+	var lastPath, lastBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		lastPath = r.URL.Path
+		lastBody = string(b)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"header":{"cluster_id":"1","member_id":"1","revision":"1","raft_term":"1"}}`)
+	}))
+	return srv, &lastPath, &lastBody
+}
+
+// testAdmin builds an Admin for tests using a mock etcd server and a mock bounceFunc.
+func testAdmin(t *testing.T, etcdURL string) (*Admin, *[]string) {
+	t.Helper()
+	var bounced []string
+	return &Admin{
+		token:    "test-token",
+		etcdURLs: []string{etcdURL},
+		domain:   "test.local",
+		sshKey:   "/dev/null",
+		http:     &http.Client{Timeout: 3 * time.Second},
+		bounceFunc: func(_ context.Context, node, _, _ string) error {
+			bounced = append(bounced, node)
+			return nil
+		},
+	}, &bounced
 }
 
 // ---- envOr ----
@@ -49,11 +83,10 @@ func TestHealthAll_AggregatesAllNodes(t *testing.T) {
 	agg := newAggregator([]RuntimeNode{
 		{Name: "n1", BaseURL: s1.URL},
 		{Name: "n2", BaseURL: s2.URL},
-		{Name: "n3", BaseURL: "http://127.0.0.1:1"}, // unreachable
+		{Name: "n3", BaseURL: "http://127.0.0.1:1"},
 	})
 
 	healths := agg.healthAll(t.Context())
-
 	if healths["n1"].Status != "ok" {
 		t.Errorf("n1: got %q, want ok", healths["n1"].Status)
 	}
@@ -89,7 +122,7 @@ func TestFirst_ReturnsFirstResponder(t *testing.T) {
 	defer srv.Close()
 
 	agg := newAggregator([]RuntimeNode{
-		{Name: "n1", BaseURL: "http://127.0.0.1:1"}, // will fail first
+		{Name: "n1", BaseURL: "http://127.0.0.1:1"},
 		{Name: "n2", BaseURL: srv.URL},
 	})
 	body, name, err := agg.first(t.Context(), "/api/v1/prices/all")
@@ -120,7 +153,7 @@ func TestFirst_CancelledContextReturnsError(t *testing.T) {
 	defer srv.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // cancel immediately
+	cancel()
 
 	agg := newAggregator([]RuntimeNode{{Name: "n1", BaseURL: srv.URL}})
 	_, _, err := agg.first(ctx, "/api/v1/cluster")
@@ -129,10 +162,10 @@ func TestFirst_CancelledContextReturnsError(t *testing.T) {
 	}
 }
 
-// ---- HTTP handlers ----
+// ---- read-only HTTP handlers ----
 
 func TestHandler_SelfHealth(t *testing.T) {
-	h := makeHandler(newAggregator(nil))
+	h := makeHandler(newAggregator(nil), nil)
 	r := httptest.NewRequest("GET", "/api/v1/health", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
@@ -147,7 +180,7 @@ func TestHandler_SelfHealth(t *testing.T) {
 
 func TestHandler_CORS_Header(t *testing.T) {
 	t.Setenv("DASH_ORIGIN", "https://dash.test.local")
-	h := makeHandler(newAggregator(nil))
+	h := makeHandler(newAggregator(nil), nil)
 	r := httptest.NewRequest("GET", "/api/v1/health", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
@@ -158,7 +191,7 @@ func TestHandler_CORS_Header(t *testing.T) {
 }
 
 func TestHandler_Options_Preflight(t *testing.T) {
-	h := makeHandler(newAggregator(nil))
+	h := makeHandler(newAggregator(nil), nil)
 	r := httptest.NewRequest("OPTIONS", "/api/v1/prices/all", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
@@ -176,7 +209,7 @@ func TestHandler_PricesAll_Proxied(t *testing.T) {
 	defer srv.Close()
 
 	agg := newAggregator([]RuntimeNode{{Name: "n1", BaseURL: srv.URL}})
-	h := makeHandler(agg)
+	h := makeHandler(agg, nil)
 	r := httptest.NewRequest("GET", "/api/v1/prices/all", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
@@ -195,7 +228,7 @@ func TestHandler_PricesSector_Proxied(t *testing.T) {
 	defer srv.Close()
 
 	agg := newAggregator([]RuntimeNode{{Name: "n1", BaseURL: srv.URL}})
-	h := makeHandler(agg)
+	h := makeHandler(agg, nil)
 	r := httptest.NewRequest("GET", "/api/v1/prices/natgas", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
@@ -217,7 +250,7 @@ func TestHandler_News_Proxied(t *testing.T) {
 	defer srv.Close()
 
 	agg := newAggregator([]RuntimeNode{{Name: "n1", BaseURL: srv.URL}})
-	h := makeHandler(agg)
+	h := makeHandler(agg, nil)
 	r := httptest.NewRequest("GET", "/api/v1/news", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
@@ -232,14 +265,14 @@ func TestHandler_News_Proxied(t *testing.T) {
 
 func TestHandler_Cluster_Proxied(t *testing.T) {
 	payload := map[string]any{
-		"nodes":      map[string]any{"n1": map[string]any{"provider": "hetzner"}},
+		"nodes":       map[string]any{"n1": map[string]any{"provider": "hetzner"}},
 		"active_node": "n1",
 	}
 	srv := httptest.NewServer(serveJSON(payload))
 	defer srv.Close()
 
 	agg := newAggregator([]RuntimeNode{{Name: "n1", BaseURL: srv.URL}})
-	h := makeHandler(agg)
+	h := makeHandler(agg, nil)
 	r := httptest.NewRequest("GET", "/api/v1/cluster", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
@@ -254,7 +287,7 @@ func TestHandler_Cluster_Proxied(t *testing.T) {
 
 func TestHandler_503_WhenNoNodesAvailable(t *testing.T) {
 	agg := newAggregator([]RuntimeNode{{Name: "n1", BaseURL: "http://127.0.0.1:1"}})
-	h := makeHandler(agg)
+	h := makeHandler(agg, nil)
 
 	for _, path := range []string{"/api/v1/prices/all", "/api/v1/news", "/api/v1/cluster"} {
 		r := httptest.NewRequest("GET", path, nil)
@@ -274,7 +307,7 @@ func TestHandler_HealthAll_MarksUnreachableOffline(t *testing.T) {
 		{Name: "n1", BaseURL: srv.URL},
 		{Name: "n2", BaseURL: "http://127.0.0.1:1"},
 	})
-	h := makeHandler(agg)
+	h := makeHandler(agg, nil)
 	r := httptest.NewRequest("GET", "/api/v1/health/all", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
@@ -288,5 +321,141 @@ func TestHandler_HealthAll_MarksUnreachableOffline(t *testing.T) {
 	}
 	if !strings.Contains(body, "hetzner") {
 		t.Errorf("expected hetzner in health/all response: %s", body)
+	}
+}
+
+// ---- admin routes ----
+
+func TestAdminRoutes_503WhenNotConfigured(t *testing.T) {
+	h := makeHandler(newAggregator(nil), nil) // nil admin
+	for _, tc := range []struct{ method, path string }{
+		{"DELETE", "/api/v1/admin/scrape-lock"},
+		{"PUT", "/api/v1/admin/config/scrape-interval"},
+		{"POST", "/api/v1/admin/nodes/n1/bounce"},
+	} {
+		r := httptest.NewRequest(tc.method, tc.path, strings.NewReader("{}"))
+		r.Header.Set("Authorization", "Bearer anything")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != http.StatusServiceUnavailable {
+			t.Errorf("%s %s: got %d, want 503", tc.method, tc.path, w.Code)
+		}
+	}
+}
+
+func TestAdminRoutes_401WithWrongToken(t *testing.T) {
+	etcdSrv, _, _ := mockEtcd(t)
+	defer etcdSrv.Close()
+	adm, _ := testAdmin(t, etcdSrv.URL)
+	h := makeHandler(newAggregator(nil), adm)
+
+	r := httptest.NewRequest("DELETE", "/api/v1/admin/scrape-lock", nil)
+	r.Header.Set("Authorization", "Bearer wrong-token")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("wrong token: got %d, want 401", w.Code)
+	}
+}
+
+func TestAdmin_ForceScrape_DeletesLock(t *testing.T) {
+	etcdSrv, lastPath, lastBody := mockEtcd(t)
+	defer etcdSrv.Close()
+	adm, _ := testAdmin(t, etcdSrv.URL)
+	h := makeHandler(newAggregator(nil), adm)
+
+	r := httptest.NewRequest("DELETE", "/api/v1/admin/scrape-lock", nil)
+	r.Header.Set("Authorization", "Bearer test-token")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("force scrape: got %d, want 200 — body: %s", w.Code, w.Body.String())
+	}
+	if *lastPath != "/v3/kv/deleterange" {
+		t.Errorf("etcd path: got %q, want /v3/kv/deleterange", *lastPath)
+	}
+	if !strings.Contains(*lastBody, etcdKey(etcdScrapeLockKey)) {
+		t.Errorf("etcd body missing encoded lock key: %s", *lastBody)
+	}
+}
+
+func TestAdmin_SetInterval_PutsValue(t *testing.T) {
+	etcdSrv, lastPath, lastBody := mockEtcd(t)
+	defer etcdSrv.Close()
+	adm, _ := testAdmin(t, etcdSrv.URL)
+	h := makeHandler(newAggregator(nil), adm)
+
+	r := httptest.NewRequest("PUT", "/api/v1/admin/config/scrape-interval",
+		strings.NewReader(`{"seconds":600}`))
+	r.Header.Set("Authorization", "Bearer test-token")
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("set interval: got %d, want 200 — body: %s", w.Code, w.Body.String())
+	}
+	if *lastPath != "/v3/kv/put" {
+		t.Errorf("etcd path: got %q, want /v3/kv/put", *lastPath)
+	}
+	if !strings.Contains(*lastBody, etcdKey(etcdIntervalKey)) {
+		t.Errorf("etcd body missing encoded interval key: %s", *lastBody)
+	}
+	if !strings.Contains(*lastBody, etcdVal("600")) {
+		t.Errorf("etcd body missing encoded value 600: %s", *lastBody)
+	}
+}
+
+func TestAdmin_SetInterval_RejectsTooLow(t *testing.T) {
+	etcdSrv, _, _ := mockEtcd(t)
+	defer etcdSrv.Close()
+	adm, _ := testAdmin(t, etcdSrv.URL)
+	h := makeHandler(newAggregator(nil), adm)
+
+	r := httptest.NewRequest("PUT", "/api/v1/admin/config/scrape-interval",
+		strings.NewReader(`{"seconds":30}`))
+	r.Header.Set("Authorization", "Bearer test-token")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("low interval: got %d, want 400", w.Code)
+	}
+}
+
+func TestAdmin_BounceNode_CallsSSH(t *testing.T) {
+	etcdSrv, _, _ := mockEtcd(t)
+	defer etcdSrv.Close()
+	adm, bounced := testAdmin(t, etcdSrv.URL)
+	h := makeHandler(newAggregator(nil), adm)
+
+	r := httptest.NewRequest("POST", "/api/v1/admin/nodes/n2/bounce", nil)
+	r.Header.Set("Authorization", "Bearer test-token")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("bounce: got %d, want 200 — body: %s", w.Code, w.Body.String())
+	}
+	if len(*bounced) != 1 || (*bounced)[0] != "n2" {
+		t.Errorf("bounced nodes: got %v, want [n2]", *bounced)
+	}
+}
+
+func TestAdmin_BounceNode_RejectsUnknown(t *testing.T) {
+	etcdSrv, _, _ := mockEtcd(t)
+	defer etcdSrv.Close()
+	adm, _ := testAdmin(t, etcdSrv.URL)
+	h := makeHandler(newAggregator(nil), adm)
+
+	r := httptest.NewRequest("POST", "/api/v1/admin/nodes/n4/bounce", nil)
+	r.Header.Set("Authorization", "Bearer test-token")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("unknown node: got %d, want 400", w.Code)
 	}
 }

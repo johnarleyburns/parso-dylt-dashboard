@@ -3,6 +3,7 @@ import { RefreshCw, AlertTriangle } from 'lucide-react'
 import EnergyCurve3D from './components/EnergyCurve3D'
 import NewsPanel from './components/NewsPanel'
 import NodeHealthGrid from './components/NodeHealthGrid'
+import AdminPanel from './components/AdminPanel'
 import type { AllPrices, NewsResponse, AllHealth } from './types'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'https://ctrl.oilfield.parso.guru'
@@ -144,6 +145,7 @@ export default function App() {
               {lastRefresh.toLocaleTimeString('en-US', { hour12: false })} UTC
             </span>
           )}
+          <AdminPanel nodeNames={['n1', 'n2', 'n3']} />
         </div>
       </header>
 
