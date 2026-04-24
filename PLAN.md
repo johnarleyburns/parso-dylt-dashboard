@@ -863,7 +863,33 @@ Doubling all products, adding 5 more news sources, extending forward curves to 3
 
 End-to-end validation from bare metal to live dashboard. All steps use scripts built in Phases 1–6.
 
-### 16.1 Provision (Phase 1 scripts)
+### 16.0 Meta Scripts (Recommended)
+
+Two top-level scripts orchestrate everything:
+
+| Script | Purpose |
+|--------|---------|
+| `./infra/up.sh` | Full bring-up: provision → bootstrap → DNS → TLS → deploy (all parallel where safe) |
+| `./infra/teardown/teardown-all.sh` | Delete all four VMs; pass `--yes` to skip confirmation |
+
+**Bring up the entire cluster:**
+```bash
+export ADMIN_EMAIL=john@parso.guru   # required by tls.sh (Let's Encrypt registration)
+./infra/up.sh
+```
+
+`up.sh` runs the four provision scripts in parallel, then daylight.sh on N1/N2/N3 in parallel, then dns.sh, then tls.sh on all four nodes in parallel, then deploy-app.sh and deploy-dash.sh. Total wall-clock time: ~25–35 min.
+
+**Tear down the entire cluster:**
+```bash
+./infra/teardown/teardown-all.sh           # prompts "Type 'yes' to confirm"
+./infra/teardown/teardown-all.sh --yes     # skip prompt (CI use)
+REMOVE_DNS=1 ./infra/teardown/teardown-all.sh  # also delete Cloudflare A records
+```
+
+---
+
+### 16.1 Provision (individual scripts, or use up.sh above)
 
 ```bash
 ./infra/provision/hetzner.sh   # → infra/state/hetzner.ip  (N1, US-East)
@@ -872,7 +898,7 @@ End-to-end validation from bare metal to live dashboard. All steps use scripts b
 ./infra/provision/upcloud.sh   # → infra/state/upcloud.ip  (N4, US-Central)
 ```
 
-### 16.2 Bootstrap (Phase 2 scripts)
+### 16.2 Bootstrap (individual scripts, or use up.sh above)
 
 base.sh is called automatically by each provision script. After all four IPs exist:
 
@@ -897,7 +923,7 @@ for NODE in n1 n2 n3 ctrl; do
 done
 ```
 
-### 16.3 Deploy (Phase 5 scripts)
+### 16.3 Deploy (individual scripts, or use up.sh above)
 
 ```bash
 ./infra/deploy/deploy-app.sh all   # cross-compile api+scraper → scp → restart on N1/N2/N3
@@ -953,5 +979,5 @@ In `dash.oilfield.parso.guru`:
 ---
 
 *End of PLAN.md — Parso Consulting / oilfield project*
-*Revision 3: added Phase 6 state-changing ops, Phase 7 Systems Test runbook*
+*Revision 4: added meta scripts up.sh + teardown-all.sh, Phase 7 runbook updated*
 *Last updated: April 2026*
