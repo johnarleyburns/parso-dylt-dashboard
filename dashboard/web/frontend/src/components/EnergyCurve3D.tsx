@@ -140,6 +140,8 @@ export default function EnergyCurve3D({ prices, visibleSectors }: EnergyCurve3DP
   }, [prices, visibleSectors])
 
   // Gather all curves: one per unique symbol across visible sectors.
+  // Prices are normalized per-sector (0–100 scale) so crude ($94) and gas ($2.68)
+  // are both visible on the same Y axis without one dwarfing the other.
   const curves = useMemo(() => {
     const result: Array<{
       key: string
@@ -152,6 +154,12 @@ export default function EnergyCurve3D({ prices, visibleSectors }: EnergyCurve3DP
     for (const [sector, pts] of Object.entries(prices)) {
       if (!visibleSectors.has(sector) || pts.length === 0) continue
 
+      // Compute sector-wide min/max for normalization.
+      const allPrices = pts.map((p) => p.price).filter((v) => v > 0)
+      const sectorMin = Math.min(...allPrices)
+      const sectorMax = Math.max(...allPrices)
+      const sectorRange = sectorMax - sectorMin || 1
+
       // Group by symbol — each symbol gets its own curve.
       const bySymbol = new Map<string, PricePoint[]>()
       pts.forEach((p) => {
@@ -161,9 +169,14 @@ export default function EnergyCurve3D({ prices, visibleSectors }: EnergyCurve3DP
       })
 
       for (const [symbol, symbolPts] of bySymbol) {
+        // Normalize each price to 0–100 within this sector's range.
+        const normalized = symbolPts.map((p) => ({
+          ...p,
+          price: ((p.price - sectorMin) / sectorRange) * 80 + 10, // 10–90 band
+        }))
         result.push({
           key: `${sector}-${symbol}`,
-          points: buildPoints(symbolPts, zIndex, baseMonth),
+          points: buildPoints(normalized, zIndex, baseMonth),
           color: SECTOR_COLORS[sector] ?? '#94a3b8',
           label: symbol,
         })
@@ -173,10 +186,10 @@ export default function EnergyCurve3D({ prices, visibleSectors }: EnergyCurve3DP
     return result
   }, [prices, visibleSectors, baseMonth])
 
-  // Month tick labels for X axis (at z=0 level)
+  // Month tick labels for X axis (at z=0 level) — every 3 months over 24-month span
   const monthLabels = useMemo(() => {
     const labels: Array<{ x: number; text: string }> = []
-    for (let i = 0; i <= 12; i++) {
+    for (let i = 0; i <= 24; i += 3) {
       const d = new Date(baseMonth)
       d.setMonth(d.getMonth() + i)
       labels.push({ x: i, text: monthLabel(d.toISOString()) })
@@ -187,18 +200,18 @@ export default function EnergyCurve3D({ prices, visibleSectors }: EnergyCurve3DP
   return (
     // The Canvas mounts once. Price data changes update geometry via refs — no remount.
     <Canvas
-      camera={{ position: [12, 60, 30], fov: 50 }}
+      camera={{ position: [24, 120, 60], fov: 50 }}
       style={{ background: '#0a0e1a' }}
     >
       <ambientLight intensity={0.6} />
 
       {/* X-axis month labels */}
       {monthLabels.map(({ x, text }) => (
-        <AxisLabel key={x} position={[x, -5, -2]} text={text} fontSize={0.35} />
+        <AxisLabel key={x} position={[x, -8, -2]} text={text} fontSize={0.5} />
       ))}
 
       {/* Y-axis label */}
-      <AxisLabel position={[-2, 40, 0]} text="Price (USD)" />
+      <AxisLabel position={[-3, 50, 0]} text="Price (normalized)" />
 
       {/* One curve per product symbol */}
       {curves.map(({ key, points, color }) => (
@@ -206,15 +219,15 @@ export default function EnergyCurve3D({ prices, visibleSectors }: EnergyCurve3DP
       ))}
 
       {/* Grid helpers for orientation */}
-      <gridHelper args={[40, 20, '#1e293b', '#1e293b']} position={[18, 0, 20]} />
+      <gridHelper args={[60, 24, '#1e293b', '#1e293b']} position={[12, 0, 20]} />
 
       <OrbitControls
         enablePan
         enableZoom
         enableRotate
-        target={[10, 30, 10]}
-        minDistance={5}
-        maxDistance={150}
+        target={[12, 50, 10]}
+        minDistance={10}
+        maxDistance={300}
       />
     </Canvas>
   )

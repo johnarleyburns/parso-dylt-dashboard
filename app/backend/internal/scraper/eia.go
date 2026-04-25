@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -55,16 +56,77 @@ func NewEIAClient(apiKey string) *EIAClient {
 type eiaResp struct {
 	Response struct {
 		Data []struct {
-			Period string  `json:"period"`
-			Value  float64 `json:"value"`
-			Units  string  `json:"units"`
+			Period string `json:"period"`
+			// EIA API v2 returns value as a JSON string ("91.38"); test mocks use a number.
+			// interface{} handles both.
+			Value interface{} `json:"value"`
+			Units string      `json:"units"`
 		} `json:"data"`
 	} `json:"response"`
 }
 
-func (e *EIAClient) fetchLatest(ctx context.Context, route, seriesID string) (price float64, period string, unit string, err error) {
+// parseEIAValue converts the mixed-type value field (string or float64) to float64.
+func parseEIAValue(v interface{}) (float64, error) {
+	switch x := v.(type) {
+	case float64:
+		return x, nil
+	case string:
+		return strconv.ParseFloat(x, 64)
+	}
+	return 0, fmt.Errorf("unexpected value type %T: %v", v, v)
+}
+
+// fetchHistory returns the last `count` monthly price points for a series, oldest first.
+func (e *EIAClient) fetchHistory(ctx context.Context, route, seriesID string, count int) ([]PricePoint, error) {
 	url := fmt.Sprintf(
-		"https://api.eia.gov/v2/%s/data/?api_key=%s&frequency=daily&data[0]=value&facets[series][]=%s&sort[0][column]=period&sort[0][direction]=desc&length=1",
+		"https://api.eia.gov/v2/%s/data/?api_key=%s&frequency=monthly&data[0]=value&facets[series][]=%s&sort[0][column]=period&sort[0][direction]=desc&length=%d",
+		route, e.apiKey, seriesID, count,
+	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := e.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var r eiaResp
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		return nil, err
+	}
+	if len(r.Response.Data) == 0 {
+		return nil, fmt.Errorf("no data for series %s", seriesID)
+	}
+	now := time.Now().UTC()
+	// Reverse so points are oldest-first (natural time order for charting).
+	data := r.Response.Data
+	var pts []PricePoint
+	for i := len(data) - 1; i >= 0; i-- {
+		d := data[i]
+		v, err := parseEIAValue(d.Value)
+		if err != nil || v <= 0 {
+			continue
+		}
+		pts = append(pts, PricePoint{
+			Price:         v,
+			DeliveryMonth: d.Period + "-01", // "YYYY-MM" → "YYYY-MM-01" for date parsing
+			ScrapedAt:     now,
+			Source:        "eia_api",
+		})
+	}
+	if len(pts) == 0 {
+		return nil, fmt.Errorf("no valid price data for series %s", seriesID)
+	}
+	return pts, nil
+}
+
+// fetchLatest returns the single most-recent data point for a series (price, period, unit).
+// Used for sources that don't support history (e.g. EIA STEO for JKM LNG).
+func (e *EIAClient) fetchLatest(ctx context.Context, route, seriesID string) (price float64, period, unit string, err error) {
+	url := fmt.Sprintf(
+		"https://api.eia.gov/v2/%s/data/?api_key=%s&frequency=monthly&data[0]=value&facets[series][]=%s&sort[0][column]=period&sort[0][direction]=desc&length=1",
 		route, e.apiKey, seriesID,
 	)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -85,23 +147,41 @@ func (e *EIAClient) fetchLatest(ctx context.Context, route, seriesID string) (pr
 		return 0, "", "", fmt.Errorf("no data for series %s", seriesID)
 	}
 	d := r.Response.Data[0]
-	return d.Value, d.Period, d.Units, nil
+	v, err := parseEIAValue(d.Value)
+	if err != nil {
+		return 0, "", "", fmt.Errorf("parse value %v: %w", d.Value, err)
+	}
+	return v, d.Period, d.Units, nil
 }
 
-func (e *EIAClient) fetchPoint(ctx context.Context, seriesID string, meta PricePoint) (PricePoint, error) {
+// fetchHistoryPoints fetches monthly history for a series and fills in metadata from the template.
+func (e *EIAClient) fetchHistoryPoints(ctx context.Context, seriesID string, meta PricePoint, count int) ([]PricePoint, error) {
 	route, ok := eiaRouteMap[seriesID]
 	if !ok {
-		return PricePoint{}, fmt.Errorf("no route configured for series %s", seriesID)
+		return nil, fmt.Errorf("no route configured for series %s", seriesID)
 	}
-	price, period, _, err := e.fetchLatest(ctx, route, seriesID)
+	pts, err := e.fetchHistory(ctx, route, seriesID, count)
+	if err != nil {
+		return nil, err
+	}
+	for i := range pts {
+		pts[i].Symbol = meta.Symbol
+		pts[i].Name = meta.Name
+		pts[i].Sector = meta.Sector
+		pts[i].Exchange = meta.Exchange
+		pts[i].Geography = meta.Geography
+		pts[i].Unit = meta.Unit
+	}
+	return pts, nil
+}
+
+// fetchPoint kept for single-point use (LNG STEO, electricity RTO).
+func (e *EIAClient) fetchPoint(ctx context.Context, seriesID string, meta PricePoint) (PricePoint, error) {
+	pts, err := e.fetchHistoryPoints(ctx, seriesID, meta, 1)
 	if err != nil {
 		return PricePoint{}, err
 	}
-	meta.Price = price
-	meta.DeliveryMonth = period
-	meta.ScrapedAt = time.Now().UTC()
-	meta.Source = "eia_api"
-	return meta, nil
+	return pts[0], nil
 }
 
 // ScrapeCrude returns EIA-sourced crude oil price points.
@@ -198,10 +278,14 @@ func (e *EIAClient) ScrapeElectricity(ctx context.Context) []PricePoint {
 			continue
 		}
 		d := r.Response.Data[0]
+		v, err := parseEIAValue(d.Value)
+		if err != nil || v <= 0 {
+			continue
+		}
 		points = append(points, PricePoint{
 			Symbol: rto.symbol, Name: rto.name, Sector: "electricity",
 			Exchange: "RTO", Geography: rto.geography, DeliveryMonth: d.Period,
-			Price: d.Value, Unit: "USD/MWh", ScrapedAt: now, Source: "eia_api",
+			Price: v, Unit: "USD/MWh", ScrapedAt: now, Source: "eia_api",
 		})
 	}
 	return points
@@ -219,30 +303,26 @@ func (e *EIAClient) ScrapeRefined(ctx context.Context) []PricePoint {
 	})
 }
 
-// fetchAll runs a list of EIA fetches concurrently, skipping any that fail.
+// fetchAll fetches 24 months of monthly history for each spec concurrently.
 func fetchAll(ctx context.Context, e *EIAClient, specs []struct {
 	series string
 	meta   PricePoint
 }) []PricePoint {
 	type result struct {
-		p   PricePoint
-		err error
+		pts []PricePoint
 	}
 	ch := make(chan result, len(specs))
 	for _, s := range specs {
 		s := s
 		go func() {
-			p, err := e.fetchPoint(ctx, s.series, s.meta)
-			ch <- result{p, err}
+			pts, _ := e.fetchHistoryPoints(ctx, s.series, s.meta, 24)
+			ch <- result{pts}
 		}()
 	}
 	var points []PricePoint
 	for range specs {
 		r := <-ch
-		if r.err == nil {
-			points = append(points, r.p)
-		}
-		// individual failures are logged by the caller; we skip silently here
+		points = append(points, r.pts...)
 	}
 	return points
 }
