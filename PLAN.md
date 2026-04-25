@@ -981,3 +981,87 @@ In `dash.oilfield.parso.guru`:
 *End of PLAN.md — Parso Consulting / oilfield project*
 *Revision 4: added meta scripts up.sh + teardown-all.sh, Phase 7 runbook updated*
 *Last updated: April 2026*
+
+---
+
+## Appendix C — Daylight Control Console (Phase 8)
+
+> **Codename:** `daylight-ctrl`  
+> **Design brief:** Demo-focused, cyberpunk terminal aesthetic, world map of nodes, fully mobile-usable. Unauthenticated read-only; admin actions gated by existing ADMIN_TOKEN.
+
+### C.1 Decisions (from design session, 2026-04-25)
+
+| Question | Answer |
+|---|---|
+| Node metrics | Pull-based: SSH into node, read `/proc/loadavg` + `free -b`. No new binary. |
+| Log access | Last N lines on demand (`journalctl -n 100 --no-pager`). No streaming. |
+| Auth | Map/status view is public (unauthenticated). Admin actions (bounce, force-scrape) keep existing Bearer token gate. |
+| Placement | Same CF Pages project (`oilfield-dash`). Accessed via ADMIN button in existing header → switches view mode. |
+| Mobile | First-class: same responsive strategy as oilfield dashboard. |
+| Aesthetic | Cyberpunk/terminal: dark background, neon green/cyan, scan-line overlay, glowing borders, monospace font. |
+| Map | Leaflet.js + CartoDB Dark Matter tiles (free, no API key). SVG polylines animate between nodes. |
+
+### C.2 New API Endpoints (dashboard/web/backend)
+
+| Method | Path | Cache TTL | Description |
+|---|---|---|---|
+| GET | `/api/v1/nodes` | 15 s | All nodes: geo, status, etcd role, heartbeat |
+| GET | `/api/v1/nodes/{name}/metrics` | 30 s | SSH pull: load avg, RAM, uptime |
+| GET | `/api/v1/nodes/{name}/logs` | 60 s | SSH pull: last 100 journalctl lines |
+
+All three are read-only. Cache prevents DDOS-by-refresh from demo audience. Node geo stored in etcd at `/daylight/nodes/{name}/geo` (JSON); falls back to `DAYLIGHT_NODE_GEO` env-var JSON array.
+
+### C.3 Frontend Components
+
+```
+AdminConsole.tsx          ← full-screen view, cyberpunk chrome
+  WorldMap.tsx            ← Leaflet map, dark tiles, node markers + SVG connection lines
+  NodeGrid.tsx            ← status cards below/beside map, one per node
+  NodeDetailDrawer.tsx    ← slide-in panel: metrics gauges + log terminal
+```
+
+### C.4 Layout (responsive)
+
+```
+Desktop (≥768px)
+┌─────────────────────────┬────────────────┐
+│  WORLD MAP (Leaflet)    │  NODE CARDS    │
+│  with SVG lines         │  (scrollable)  │
+│                         │                │
+│                         │  [selected]    │
+│                         │  metrics+logs  │
+└─────────────────────────┴────────────────┘
+
+Mobile (<768px)
+┌──────────────────────┐
+│  WORLD MAP           │  (60vh)
+│  tap node → details  │
+├──────────────────────┤
+│  NODE CARDS (H-scroll)│ (fixed height)
+├──────────────────────┤
+│  DETAIL / LOGS        │ (flex remaining)
+└──────────────────────┘
+```
+
+### C.5 Cyberpunk Aesthetic Spec
+
+- **Background:** `#000d1a` (deep navy black)
+- **Primary neon:** `#00ff9f` (matrix green)
+- **Secondary neon:** `#00d4ff` (cyan)
+- **Alert neon:** `#ff0080` (hot pink)
+- **Borders:** `1px solid #00ff9f33` with `box-shadow: 0 0 8px #00ff9f22`
+- **Font:** `'Courier New', Courier, monospace` everywhere
+- **Scan lines:** CSS `repeating-linear-gradient` overlay, 2px period, 5% opacity
+- **Map markers:** pulsing SVG circles, colour by health (green/amber/red neon)
+- **Connection lines:** animated SVG dashes cycling along the great-circle path
+- **Node cards:** dark glass `background: #00ff9f08`, neon border glow on hover
+
+### C.6 Implementation Phases
+
+1. Backend: cache primitives + `/nodes` + `/metrics` + `/logs` endpoints
+2. Frontend: install react-leaflet; WorldMap with markers and lines
+3. Frontend: NodeGrid cards + NodeDetailDrawer
+4. Frontend: AdminConsole layout wired into App.tsx ADMIN button
+5. Deploy + test on mobile
+
+*End Appendix C*

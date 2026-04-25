@@ -287,6 +287,158 @@ func sshBounce(ctx context.Context, node, domain, sshKey string) error {
 	return nil
 }
 
+// ---- TTL cache (prevents hammering nodes on demo traffic) ----
+
+type ttlCache struct {
+	mu      sync.Mutex
+	val     []byte
+	err     error
+	fetched time.Time
+	ttl     time.Duration
+}
+
+func (c *ttlCache) get(fetch func() ([]byte, error)) ([]byte, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.fetched.IsZero() || time.Since(c.fetched) >= c.ttl {
+		c.val, c.err = fetch()
+		c.fetched = time.Now()
+	}
+	return c.val, c.err
+}
+
+// ---- Node geo config ----
+
+type NodeGeo struct {
+	Name     string  `json:"name"`
+	Lat      float64 `json:"lat"`
+	Lon      float64 `json:"lon"`
+	City     string  `json:"city"`
+	Country  string  `json:"country"`
+	Provider string  `json:"provider"`
+	Role     string  `json:"role"` // "runtime" | "ctrl"
+}
+
+var defaultNodeGeos = []NodeGeo{
+	{Name: "n1", Role: "runtime", Lat: 49.45, Lon: 11.08, City: "Nuremberg", Country: "DE", Provider: "Hetzner"},
+	{Name: "n2", Role: "runtime", Lat: 40.74, Lon: -74.18, City: "Newark", Country: "US", Provider: "Linode"},
+	{Name: "n3", Role: "runtime", Lat: 48.86, Lon: 2.35, City: "Paris", Country: "FR", Provider: "Scaleway"},
+	{Name: "n4", Role: "ctrl", Lat: 60.17, Lon: 24.94, City: "Helsinki", Country: "FI", Provider: "UpCloud"},
+}
+
+// NodeInfo merges NodeGeo with live health status for the control console.
+type NodeInfo struct {
+	NodeGeo
+	Status      string `json:"status"`
+	EtcdHealthy bool   `json:"etcd_healthy"`
+}
+
+func sshKeyPath() string {
+	return envOr("DEPLOY_SSH_KEY", os.ExpandEnv("$HOME/.ssh/oilfield_ed25519"))
+}
+
+func loadNodeGeos() []NodeGeo {
+	raw := os.Getenv("DAYLIGHT_NODE_GEO")
+	if raw == "" {
+		return defaultNodeGeos
+	}
+	var geos []NodeGeo
+	if err := json.Unmarshal([]byte(raw), &geos); err != nil {
+		log.Printf("DAYLIGHT_NODE_GEO parse error: %v — using defaults", err)
+		return defaultNodeGeos
+	}
+	return geos
+}
+
+// ---- SSH pull helpers ----
+
+func sshRun(ctx context.Context, host, sshKey, cmd string) (string, error) {
+	out, err := exec.CommandContext(ctx, "ssh",
+		"-i", sshKey,
+		"-o", "StrictHostKeyChecking=accept-new",
+		"-o", "ConnectTimeout=10",
+		"-o", "BatchMode=yes",
+		host,
+		cmd,
+	).Output()
+	if err != nil {
+		return "", fmt.Errorf("ssh %s: %w", host, err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+type NodeMetrics struct {
+	Load1         float64 `json:"load1"`
+	Load5         float64 `json:"load5"`
+	Load15        float64 `json:"load15"`
+	MemTotalMB    int64   `json:"mem_total_mb"`
+	MemUsedMB     int64   `json:"mem_used_mb"`
+	MemFreeMB     int64   `json:"mem_free_mb"`
+	MemUsedPct    float64 `json:"mem_used_pct"`
+	UptimeSeconds int64   `json:"uptime_seconds"`
+}
+
+func parseMetrics(raw string) NodeMetrics {
+	var m NodeMetrics
+	for _, line := range strings.Split(raw, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		switch {
+		case fields[0] == "Mem:":
+			// free -m: "Mem: total used free ..."
+			if len(fields) >= 4 {
+				fmt.Sscanf(fields[1], "%d", &m.MemTotalMB)
+				fmt.Sscanf(fields[2], "%d", &m.MemUsedMB)
+				fmt.Sscanf(fields[3], "%d", &m.MemFreeMB)
+				if m.MemTotalMB > 0 {
+					m.MemUsedPct = float64(m.MemUsedMB) / float64(m.MemTotalMB) * 100
+				}
+			}
+		case len(fields) == 1 && strings.Contains(fields[0], "."):
+			// awk '{print $1}' /proc/uptime — single float like "86400.5"
+			var sec float64
+			if n, _ := fmt.Sscanf(fields[0], "%f", &sec); n == 1 && sec > 0 {
+				m.UptimeSeconds = int64(sec)
+			}
+		case len(fields) >= 3:
+			// /proc/loadavg: "0.42 0.35 0.28 1/342 12345"
+			var l1, l5, l15 float64
+			if n, _ := fmt.Sscanf(line, "%f %f %f", &l1, &l5, &l15); n == 3 {
+				m.Load1, m.Load5, m.Load15 = l1, l5, l15
+			}
+		}
+	}
+	return m
+}
+
+// ---- per-node SSH caches ----
+
+type nodeSSHCache struct {
+	metrics ttlCache
+	logs    ttlCache
+}
+
+var (
+	sshCaches   = map[string]*nodeSSHCache{}
+	sshCachesMu sync.Mutex
+)
+
+func getSSHCache(name string, metricsTTL, logsTTL time.Duration) *nodeSSHCache {
+	sshCachesMu.Lock()
+	defer sshCachesMu.Unlock()
+	if c, ok := sshCaches[name]; ok {
+		return c
+	}
+	c := &nodeSSHCache{
+		metrics: ttlCache{ttl: metricsTTL},
+		logs:    ttlCache{ttl: logsTTL},
+	}
+	sshCaches[name] = c
+	return c
+}
+
 // ---- HTTP helpers ----
 
 func cors(w http.ResponseWriter, r *http.Request) {
@@ -434,6 +586,101 @@ func makeHandler(agg *Aggregator, adm *Admin) http.Handler {
 				map[string]string{"status": "restarted", "node": name})
 		},
 	))
+
+	// ---- Daylight Control Console — read-only, SSH-backed, TTL-cached ----
+
+	nodesCache := ttlCache{ttl: 15 * time.Second}
+
+	// GET /api/v1/nodes — geo + health for every node (15 s cache)
+	mux.HandleFunc("GET /api/v1/nodes", func(w http.ResponseWriter, r *http.Request) {
+		cors(w, r)
+		data, err := nodesCache.get(func() ([]byte, error) {
+			ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+			defer cancel()
+			geos := loadNodeGeos()
+			health := agg.healthAll(ctx)
+			infos := make([]NodeInfo, 0, len(geos))
+			for _, g := range geos {
+				ni := NodeInfo{NodeGeo: g}
+				if g.Role == "ctrl" {
+					ni.Status = "ctrl"
+				} else {
+					ni.Status = "offline"
+				}
+				if h, ok := health[g.Name]; ok {
+					ni.Status = h.Status
+					ni.EtcdHealthy = h.EtcdHealthy
+				}
+				infos = append(infos, ni)
+			}
+			return json.Marshal(infos)
+		})
+		if err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(data)
+	})
+
+	// GET /api/v1/nodes/{name}/metrics — SSH pull /proc/loadavg + free -m (30 s cache)
+	mux.HandleFunc("GET /api/v1/nodes/{name}/metrics", func(w http.ResponseWriter, r *http.Request) {
+		cors(w, r)
+		name := r.PathValue("name")
+		domain := envOr("OILFIELD_DOMAIN", "oilfield.parso.guru")
+		host := "deploy@" + name + "." + domain
+		cache := getSSHCache(name, 30*time.Second, 60*time.Second)
+
+		data, err := cache.metrics.get(func() ([]byte, error) {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			raw, err := sshRun(ctx, host, sshKeyPath(),
+				"cat /proc/loadavg; free -m; awk '{print $1}' /proc/uptime")
+			if err != nil {
+				return nil, err
+			}
+			return json.Marshal(parseMetrics(raw))
+		})
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(data)
+	})
+
+	// GET /api/v1/nodes/{name}/logs — SSH pull last 100 journalctl lines (60 s cache)
+	mux.HandleFunc("GET /api/v1/nodes/{name}/logs", func(w http.ResponseWriter, r *http.Request) {
+		cors(w, r)
+		name := r.PathValue("name")
+		domain := envOr("OILFIELD_DOMAIN", "oilfield.parso.guru")
+		host := "deploy@" + name + "." + domain
+		cache := getSSHCache(name, 30*time.Second, 60*time.Second)
+
+		data, err := cache.logs.get(func() ([]byte, error) {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			raw, err := sshRun(ctx, host, sshKeyPath(),
+				"sudo journalctl -u oilfield-api -u oilfield-scraper -n 100 --no-pager -o short-iso 2>&1 || true")
+			if err != nil {
+				return nil, err
+			}
+			lines := strings.Split(raw, "\n")
+			for len(lines) > 0 && lines[len(lines)-1] == "" {
+				lines = lines[:len(lines)-1]
+			}
+			return json.Marshal(map[string]any{"node": name, "lines": lines})
+		})
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(data)
+	})
 
 	// CORS preflight.
 	mux.HandleFunc("OPTIONS /", func(w http.ResponseWriter, r *http.Request) {

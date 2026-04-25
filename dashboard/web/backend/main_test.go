@@ -182,11 +182,25 @@ func TestHandler_CORS_Header(t *testing.T) {
 	t.Setenv("DASH_ORIGIN", "https://dash.test.local")
 	h := makeHandler(newAggregator(nil), nil)
 	r := httptest.NewRequest("GET", "/api/v1/health", nil)
+	r.Header.Set("Origin", "https://dash.test.local")
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 
 	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "https://dash.test.local" {
 		t.Errorf("CORS origin: got %q, want https://dash.test.local", got)
+	}
+}
+
+func TestHandler_CORS_BlocksUnknownOrigin(t *testing.T) {
+	t.Setenv("DASH_ORIGIN", "https://dash.test.local")
+	h := makeHandler(newAggregator(nil), nil)
+	r := httptest.NewRequest("GET", "/api/v1/health", nil)
+	r.Header.Set("Origin", "https://evil.example.com")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Errorf("unknown origin should get no CORS header, got %q", got)
 	}
 }
 

@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
-import { RefreshCw, AlertTriangle, Box, LineChart, TableIcon } from 'lucide-react'
+import { RefreshCw, AlertTriangle, Box, LineChart, TableIcon, Shield } from 'lucide-react'
 import EnergyCurve3D from './components/EnergyCurve3D'
 import PriceChart2D from './components/PriceChart2D'
 import PriceTable from './components/PriceTable'
 import NewsPanel from './components/NewsPanel'
 import NodeHealthGrid from './components/NodeHealthGrid'
 import AdminPanel from './components/AdminPanel'
+import AdminConsole from './components/AdminConsole'
 import type { AllPrices, NewsResponse, AllHealth } from './types'
 
 type ViewMode = '3d' | '2d' | 'table'
@@ -66,6 +67,7 @@ export default function App() {
   const [error, setError]     = useState<string | null>(null)
   const [visibleSectors, setVisibleSectors] = useState<Set<string>>(new Set(ALL_SECTORS))
   const [viewMode, setViewMode] = useState<ViewMode>('3d')
+  const [showConsole, setShowConsole] = useState(false)
 
   const mobile = useMobile()
 
@@ -203,6 +205,18 @@ export default function App() {
             <NodeHealthGrid health={health} />
             <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.35rem', flexShrink: 0 }}>
               {viewButtons}
+              <button
+                onClick={() => setShowConsole(true)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '0.2rem',
+                  padding: '0.25rem 0.45rem', borderRadius: 4,
+                  border: '1px solid #00d4ff44', background: '#00d4ff11',
+                  color: '#00d4ff', cursor: 'pointer',
+                  fontSize: '0.65rem', fontFamily: 'inherit', whiteSpace: 'nowrap',
+                }}
+              >
+                <Shield size={11} /> CTRL
+              </button>
               <AdminPanel nodeNames={['n1', 'n2', 'n3']} />
             </div>
           </div>
@@ -238,6 +252,18 @@ export default function App() {
               </span>
             )}
             {viewButtons}
+            <button
+              onClick={() => setShowConsole(true)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '0.25rem',
+                padding: '0.25rem 0.55rem', borderRadius: 4,
+                border: '1px solid #00d4ff44', background: '#00d4ff11',
+                color: '#00d4ff', cursor: 'pointer',
+                fontSize: '0.7rem', fontFamily: 'inherit', whiteSpace: 'nowrap',
+              }}
+            >
+              <Shield size={12} /> CTRL
+            </button>
             <AdminPanel nodeNames={['n1', 'n2', 'n3']} />
           </div>
         </header>
@@ -338,6 +364,11 @@ export default function App() {
           </div>
         </div>
       </div>
+
+      {/* ---- Daylight Control Console overlay ---- */}
+      {showConsole && (
+        <AdminConsole onClose={() => setShowConsole(false)} mobile={mobile} />
+      )}
     </div>
   )
 }
