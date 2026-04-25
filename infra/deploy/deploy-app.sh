@@ -30,12 +30,12 @@ for NODE in "${NODES[@]}"; do
   echo ""
   echo "==> Deploying to $NODE ($HOST)..."
 
-  scp -i "$SSH_PRIVATE_KEY_PATH" \
+  scp -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -i "$SSH_PRIVATE_KEY_PATH" \
     /tmp/oilfield-api \
     /tmp/oilfield-scraper \
     "${HOST}:/tmp/"
 
-  ssh -i "$SSH_PRIVATE_KEY_PATH" "$HOST" bash -s <<'REMOTE'
+  ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -i "$SSH_PRIVATE_KEY_PATH" "$HOST" bash -s <<'REMOTE'
     set -euo pipefail
     sudo mv /tmp/oilfield-api /opt/oilfield/bin/oilfield-api
     sudo mv /tmp/oilfield-scraper /opt/oilfield/bin/oilfield-scraper

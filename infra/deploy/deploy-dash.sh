@@ -19,9 +19,9 @@ echo "==> Building oilfield-dash-web (Go backend)..."
 (cd "$BACKEND_DIR" && GOARCH=amd64 GOOS=linux go build -o /tmp/oilfield-dash-web .)
 
 echo "==> Deploying backend to ctrl ($CTRL_HOST)..."
-scp -i "$SSH_PRIVATE_KEY_PATH" /tmp/oilfield-dash-web "${CTRL_HOST}:/tmp/"
+scp -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -i "$SSH_PRIVATE_KEY_PATH" /tmp/oilfield-dash-web "${CTRL_HOST}:/tmp/"
 
-ssh -i "$SSH_PRIVATE_KEY_PATH" "$CTRL_HOST" bash -s <<'REMOTE'
+ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -i "$SSH_PRIVATE_KEY_PATH" "$CTRL_HOST" bash -s <<'REMOTE'
   set -euo pipefail
   sudo mv /tmp/oilfield-dash-web /opt/oilfield/bin/oilfield-dash-web
   sudo chmod +x /opt/oilfield/bin/oilfield-dash-web

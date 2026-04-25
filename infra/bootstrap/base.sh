@@ -57,7 +57,7 @@ ChallengeResponseAuthentication no
 MaxAuthTries 3
 LoginGraceTime 30
 EOF
-systemctl reload ssh || systemctl reload sshd
+systemctl try-reload-or-restart ssh 2>/dev/null || systemctl try-reload-or-restart sshd 2>/dev/null || true
 
 # UFW — deny all in, allow all out, then open per-role ports
 log "Configuring UFW..."

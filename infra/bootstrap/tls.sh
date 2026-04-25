@@ -17,7 +17,12 @@ die() { echo "[tls] ERROR: $*" >&2; exit 1; }
 
 [ "$EUID" -eq 0 ] || die "Must run as root"
 
-NODE_FQDN="${NODE_NAME}.${DOMAIN}"
+# Control node is publicly reachable as ctrl.<DOMAIN>, not n4.<DOMAIN>
+if [ "${NODE_ROLE}" = "control" ]; then
+  NODE_FQDN="ctrl.${DOMAIN}"
+else
+  NODE_FQDN="${NODE_NAME}.${DOMAIN}"
+fi
 NGINX_CONF=/etc/nginx/sites-available/oilfield
 CERT_DIR="/etc/letsencrypt/live/${NODE_FQDN}"
 
