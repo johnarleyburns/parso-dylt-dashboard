@@ -82,30 +82,41 @@ export default function PriceChart2D({ prices, visibleSectors }: PriceChart2DPro
     for (const [sector, pts] of Object.entries(prices)) {
       if (!visibleSectors.has(sector)) continue
       for (const p of pts) {
-        if (!p.delivery_month) continue
+        if (!p.delivery_month || p.price <= 0) continue
         const seriesKey = `${sector}:${p.symbol}`
         if (!effectiveSelected.has(seriesKey)) continue
         const month = shortMonth(p.delivery_month)
         const row = monthMap.get(month) ?? {}
-        // If multiple points for same symbol+month (e.g. EIA + YF), take the most recent
-        if (!(seriesKey in row) || p.price > 0) {
-          row[seriesKey] = p.price
-        }
+        // Prefer EIA monthly history over YF single-point for same symbol+month
+        if (!(seriesKey in row)) row[seriesKey] = p.price
         monthMap.set(month, row)
       }
     }
 
-    // Sort by original date order
-    const sorted = Array.from(monthMap.entries())
+    return Array.from(monthMap.entries())
       .map(([month, vals]) => ({ month, ...vals }))
-      .sort((a, b) => {
-        const da = new Date(a.month), db = new Date(b.month)
-        return da.getTime() - db.getTime()
-      })
-    return sorted
+      .sort((a, b) => new Date(a.month).getTime() - new Date(b.month).getTime())
   }, [prices, visibleSectors, effectiveSelected])
 
+  // Y axis domain: fit to actual selected data with 5 % padding — never start at 0
+  const yDomain = useMemo<[number, number]>(() => {
+    let min = Infinity, max = -Infinity
+    for (const row of chartData) {
+      for (const [k, v] of Object.entries(row)) {
+        if (k === 'month' || typeof v !== 'number' || v <= 0) continue
+        if (v < min) min = v
+        if (v > max) max = v
+      }
+    }
+    if (!isFinite(min)) return [0, 1]
+    const pad = (max - min) * 0.07 || max * 0.05
+    return [Math.max(0, +(min - pad).toFixed(4)), +(max + pad).toFixed(4)]
+  }, [chartData])
+
   const selectedSeries = allSeries.filter((s) => effectiveSelected.has(s.key))
+
+  // Detect mixed-unit selection so we can warn the user
+  const mixedUnits = new Set(selectedSeries.map((s) => s.unit)).size > 1
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#0a0e1a', color: '#e2e8f0' }}>
@@ -148,9 +159,14 @@ export default function PriceChart2D({ prices, visibleSectors }: PriceChart2DPro
       </div>
 
       {/* Chart */}
-      <div style={{ flex: 1, padding: '0.75rem 0.5rem 0.5rem' }}>
+      <div style={{ flex: 1, padding: '0.75rem 0.5rem 0.5rem', display: 'flex', flexDirection: 'column' }}>
+        {mixedUnits && (
+          <div style={{ fontSize: '0.6rem', color: '#f59e0b', paddingBottom: '0.3rem', paddingLeft: '0.5rem' }}>
+            ⚠ Mixed units — select one sector for a comparable Y axis
+          </div>
+        )}
         {chartData.length === 0 ? (
-          <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#475569', fontSize: '0.8rem' }}>
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#475569', fontSize: '0.8rem' }}>
             No price data available
           </div>
         ) : (
@@ -164,10 +180,12 @@ export default function PriceChart2D({ prices, visibleSectors }: PriceChart2DPro
                 interval="preserveStartEnd"
               />
               <YAxis
+                domain={yDomain}
+                tickFormatter={(v: number) => v >= 100 ? v.toFixed(0) : v.toFixed(2)}
                 tick={{ fill: '#64748b', fontSize: 10 }}
                 tickLine={false}
                 axisLine={false}
-                width={55}
+                width={62}
               />
               <Tooltip
                 contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 4, fontSize: 11 }}
