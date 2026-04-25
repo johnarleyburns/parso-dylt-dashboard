@@ -40,3 +40,4 @@ dist/
 # Infra secrets and state
 infra/.env
 infra/state/
+.wrangler
