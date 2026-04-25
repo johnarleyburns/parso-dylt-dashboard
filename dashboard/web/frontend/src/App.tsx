@@ -1,10 +1,14 @@
 import { useState, useEffect, useCallback } from 'react'
-import { RefreshCw, AlertTriangle } from 'lucide-react'
+import { RefreshCw, AlertTriangle, Box, LineChart, TableIcon } from 'lucide-react'
 import EnergyCurve3D from './components/EnergyCurve3D'
+import PriceChart2D from './components/PriceChart2D'
+import PriceTable from './components/PriceTable'
 import NewsPanel from './components/NewsPanel'
 import NodeHealthGrid from './components/NodeHealthGrid'
 import AdminPanel from './components/AdminPanel'
 import type { AllPrices, NewsResponse, AllHealth } from './types'
+
+type ViewMode = '3d' | '2d' | 'table'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'https://ctrl.oilfield.parso.guru'
 const PRICE_INTERVAL_MS  = 30_000
@@ -48,6 +52,7 @@ export default function App() {
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
   const [error, setError]     = useState<string | null>(null)
   const [visibleSectors, setVisibleSectors] = useState<Set<string>>(new Set(ALL_SECTORS))
+  const [viewMode, setViewMode] = useState<ViewMode>('3d')
 
   const fetchPrices = useCallback(async () => {
     try {
@@ -145,6 +150,35 @@ export default function App() {
               {lastRefresh.toLocaleTimeString('en-US', { hour12: false })} UTC
             </span>
           )}
+          {/* View mode toggle */}
+          {(
+            [
+              { mode: '3d' as ViewMode,    icon: <Box size={12} />,       title: '3D Forward Curve' },
+              { mode: '2d' as ViewMode,    icon: <LineChart size={12} />, title: '2D Line Chart' },
+              { mode: 'table' as ViewMode, icon: <TableIcon size={12} />, title: 'Data Table' },
+            ] as const
+          ).map(({ mode, icon, title }) => (
+            <button
+              key={mode}
+              title={title}
+              onClick={() => setViewMode(mode)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.25rem',
+                padding: '0.25rem 0.5rem',
+                borderRadius: 4,
+                border: `1px solid ${viewMode === mode ? '#3b82f6' : '#1e293b'}`,
+                background: viewMode === mode ? '#3b82f622' : 'transparent',
+                color: viewMode === mode ? '#3b82f6' : '#475569',
+                cursor: 'pointer',
+                fontSize: '0.65rem',
+                fontFamily: 'inherit',
+              }}
+            >
+              {icon} {mode === '3d' ? '3D' : mode === '2d' ? '2D' : 'Table'}
+            </button>
+          ))}
           <AdminPanel nodeNames={['n1', 'n2', 'n3']} />
         </div>
       </header>
@@ -186,9 +220,17 @@ export default function App() {
 
       {/* ---- Main content ---- */}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-        {/* 3D chart — takes 72% of width */}
-        <div style={{ flex: '0 0 72%', position: 'relative' }}>
-          <EnergyCurve3D prices={prices} visibleSectors={visibleSectors} />
+        {/* Primary panel — 72% width, switches between views */}
+        <div style={{ flex: '0 0 72%', position: 'relative', overflow: 'hidden' }}>
+          {viewMode === '3d' && (
+            <EnergyCurve3D prices={prices} visibleSectors={visibleSectors} />
+          )}
+          {viewMode === '2d' && (
+            <PriceChart2D prices={prices} visibleSectors={visibleSectors} />
+          )}
+          {viewMode === 'table' && (
+            <PriceTable prices={prices} visibleSectors={visibleSectors} />
+          )}
         </div>
 
         {/* News panel — takes remaining 28% */}
