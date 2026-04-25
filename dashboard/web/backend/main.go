@@ -289,9 +289,15 @@ func sshBounce(ctx context.Context, node, domain, sshKey string) error {
 
 // ---- HTTP helpers ----
 
-func cors(w http.ResponseWriter, _ *http.Request) {
-	origin := envOr("DASH_ORIGIN", "https://dash.oilfield.parso.guru")
-	w.Header().Set("Access-Control-Allow-Origin", origin)
+func cors(w http.ResponseWriter, r *http.Request) {
+	allowed := strings.Split(envOr("DASH_ORIGIN", "https://dash.oilfield.parso.guru"), ",")
+	reqOrigin := r.Header.Get("Origin")
+	for _, o := range allowed {
+		if strings.TrimSpace(o) == reqOrigin {
+			w.Header().Set("Access-Control-Allow-Origin", reqOrigin)
+			break
+		}
+	}
 	w.Header().Set("Access-Control-Allow-Methods", "GET, DELETE, PUT, POST, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Authorization")
 	w.Header().Set("Vary", "Origin")

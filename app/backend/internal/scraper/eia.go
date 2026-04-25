@@ -8,49 +8,36 @@ import (
 	"time"
 )
 
-// EIA API v2 series IDs — verify at https://www.eia.gov/opendata/browser/
+// EIA API v2 series IDs — verified against live API 2026-04-25.
 // Route petroleum/pri/spt: petroleum spot prices (daily)
-// Route natural-gas/pri/sum: natural gas summary prices (daily)
+// Route natural-gas/pri/fut: natural gas futures/spot prices (daily)
 // Route electricity/rto/daily-region-data: RTO day-ahead prices
 const (
 	// Crude — petroleum/pri/spt
-	seriesWTI   = "EER_ECRWTI_PF4_Y35NY_DPG" // WTI Crude spot, Cushing OK, $/bbl
-	seriesDubai = "RBRTE"                     // Dubai Crude (Brent proxy via EIA int'l series)
+	seriesWTI   = "RWTC"  // WTI Crude spot, Cushing OK, $/bbl
+	seriesBrent = "RBRTE" // Europe Brent Crude spot FOB, $/bbl
 
-	// Natural gas — natural-gas/pri/sum (Henry Hub daily) or natural-gas/pri/fut
+	// Natural gas — natural-gas/pri/fut (Henry Hub daily spot)
 	seriesHenryHub = "RNGWHHD" // Henry Hub natural gas spot, $/MMBtu
-	seriesAECO     = "RNGC1"   // AECO natural gas spot (Canada), $/MMBtu — verify route
 
 	// LPG — petroleum/pri/spt
-	seriesPropaneMB  = "EER_EPLLPA_PF4_Y44MB_DPG" // Propane Mont Belvieu, $/gal
-	seriesButaneMB   = "EER_EPLLP_PF4_Y44MB_DPG"  // Normal Butane Mont Belvieu, $/gal
-
-	// NGLs — petroleum/pri/spt
-	seriesEthaneMB     = "EER_EPCLLA_PF4_Y44MB_DPG" // Ethane Mont Belvieu, $/gal
-	seriesIsobutaneMB  = "EER_EPLIBU_PF4_Y44MB_DPG"  // Isobutane Mont Belvieu, $/gal — verify series ID
-	seriesNatGasolineMB = "EER_EPC2LT_PF4_Y44MB_DPG" // Natural Gasoline Mont Belvieu, $/gal
+	seriesPropaneMB = "EER_EPLLPA_PF4_Y44MB_DPG" // Propane Mont Belvieu, $/gal
 
 	// Refined products — petroleum/pri/spt
-	seriesRBOB    = "EER_EPM0F_PF4_Y35NY_DPG" // RBOB Gasoline, $/gal
-	seriesULSD    = "EER_EPD2F_PF4_Y35NY_DPG" // ULSD/Heating Oil NY Harbor, $/gal
-	seriesJetFuel = "EER_EPJK_PF4_Y05LA_DPG"  // Jet Fuel LAX, $/gal
+	seriesRBOB    = "EER_EPMRR_PF4_Y05LA_DPG" // LA Reformulated RBOB Gasoline, $/gal
+	seriesULSD    = "EER_EPD2F_PF4_Y35NY_DPG"  // NY Harbor Heating Oil / ULSD, $/gal
+	seriesJetFuel = "EER_EPJK_PF4_RGC_DPG"    // US Gulf Coast Jet Fuel, $/gal
 )
 
-// eiaRoutes maps series prefix patterns to EIA v2 route paths.
-// Most petroleum series use petroleum/pri/spt; gas uses natural-gas/pri/sum.
+// eiaRouteMap maps each series ID to its EIA v2 API route.
 var eiaRouteMap = map[string]string{
-	seriesWTI:          "petroleum/pri/spt",
-	seriesDubai:        "petroleum/pri/spt",
-	seriesHenryHub:     "natural-gas/pri/sum",
-	seriesAECO:         "natural-gas/pri/sum",
-	seriesPropaneMB:    "petroleum/pri/spt",
-	seriesButaneMB:     "petroleum/pri/spt",
-	seriesEthaneMB:      "petroleum/pri/spt",
-	seriesIsobutaneMB:   "petroleum/pri/spt",
-	seriesNatGasolineMB: "petroleum/pri/spt",
-	seriesRBOB:         "petroleum/pri/spt",
-	seriesULSD:         "petroleum/pri/spt",
-	seriesJetFuel:      "petroleum/pri/spt",
+	seriesWTI:       "petroleum/pri/spt",
+	seriesBrent:     "petroleum/pri/spt",
+	seriesHenryHub:  "natural-gas/pri/fut",
+	seriesPropaneMB: "petroleum/pri/spt",
+	seriesRBOB:      "petroleum/pri/spt",
+	seriesULSD:      "petroleum/pri/spt",
+	seriesJetFuel:   "petroleum/pri/spt",
 }
 
 type EIAClient struct {
@@ -124,7 +111,7 @@ func (e *EIAClient) ScrapeCrude(ctx context.Context) []PricePoint {
 		meta   PricePoint
 	}{
 		{seriesWTI, PricePoint{Symbol: "CL", Name: "WTI Crude Oil", Sector: "crude", Exchange: "NYMEX", Geography: "US_GULF", Unit: "USD/bbl"}},
-		{seriesDubai, PricePoint{Symbol: "DC", Name: "Dubai Crude", Sector: "crude", Exchange: "PLATTS", Geography: "MIDDLE_EAST", Unit: "USD/bbl"}},
+		{seriesBrent, PricePoint{Symbol: "BZ", Name: "Europe Brent Crude", Sector: "crude", Exchange: "ICE", Geography: "NORTH_SEA", Unit: "USD/bbl"}},
 	})
 }
 
@@ -135,7 +122,6 @@ func (e *EIAClient) ScrapeNatgas(ctx context.Context) []PricePoint {
 		meta   PricePoint
 	}{
 		{seriesHenryHub, PricePoint{Symbol: "NG", Name: "Henry Hub Natural Gas", Sector: "natgas", Exchange: "NYMEX", Geography: "US_GULF", Unit: "USD/MMBtu"}},
-		{seriesAECO, PricePoint{Symbol: "AECO", Name: "AECO Natural Gas (Canada)", Sector: "natgas", Exchange: "AECO", Geography: "CANADA", Unit: "USD/MMBtu"}},
 	})
 }
 
@@ -163,20 +149,12 @@ func (e *EIAClient) ScrapeLPG(ctx context.Context) []PricePoint {
 		meta   PricePoint
 	}{
 		{seriesPropaneMB, PricePoint{Symbol: "C3", Name: "Propane Mont Belvieu", Sector: "lpg", Exchange: "OPIS", Geography: "US_GULF", Unit: "USD/gal"}},
-		{seriesButaneMB, PricePoint{Symbol: "C4", Name: "Normal Butane Mont Belvieu", Sector: "lpg", Exchange: "OPIS", Geography: "US_GULF", Unit: "USD/gal"}},
 	})
 }
 
 // ScrapeNGLs returns EIA-sourced NGL price points.
-func (e *EIAClient) ScrapeNGLs(ctx context.Context) []PricePoint {
-	return fetchAll(ctx, e, []struct {
-		series string
-		meta   PricePoint
-	}{
-		{seriesEthaneMB, PricePoint{Symbol: "C2", Name: "Ethane Mont Belvieu", Sector: "ngls", Exchange: "OPIS", Geography: "US_GULF", Unit: "USD/gal"}},
-		{seriesNatGasolineMB, PricePoint{Symbol: "C5+", Name: "Natural Gasoline Mont Belvieu", Sector: "ngls", Exchange: "OPIS", Geography: "US_GULF", Unit: "USD/gal"}},
-	})
-}
+// EIA no longer publishes daily Mont Belvieu NGL spot prices via API v2; returns empty.
+func (e *EIAClient) ScrapeNGLs(_ context.Context) []PricePoint { return nil }
 
 // ScrapeElectricity returns EIA RTO day-ahead price points.
 // Uses electricity/rto/daily-region-data — verify facet names against EIA API browser.
@@ -235,9 +213,9 @@ func (e *EIAClient) ScrapeRefined(ctx context.Context) []PricePoint {
 		series string
 		meta   PricePoint
 	}{
-		{seriesRBOB, PricePoint{Symbol: "RB", Name: "RBOB Gasoline", Sector: "refined", Exchange: "NYMEX", Geography: "US_GULF", Unit: "USD/gal"}},
-		{seriesULSD, PricePoint{Symbol: "HO", Name: "ULSD / Heating Oil", Sector: "refined", Exchange: "NYMEX", Geography: "US_GULF", Unit: "USD/gal"}},
-		{seriesJetFuel, PricePoint{Symbol: "JF", Name: "Jet Fuel LAX", Sector: "refined", Exchange: "OPIS", Geography: "US_WEST", Unit: "USD/gal"}},
+		{seriesRBOB, PricePoint{Symbol: "RB", Name: "RBOB Gasoline (LA)", Sector: "refined", Exchange: "NYMEX", Geography: "US_WEST", Unit: "USD/gal"}},
+		{seriesULSD, PricePoint{Symbol: "HO", Name: "Heating Oil / ULSD (NY Harbor)", Sector: "refined", Exchange: "NYMEX", Geography: "US_NORTHEAST", Unit: "USD/gal"}},
+		{seriesJetFuel, PricePoint{Symbol: "JF", Name: "Jet Fuel (Gulf Coast)", Sector: "refined", Exchange: "OPIS", Geography: "US_GULF", Unit: "USD/gal"}},
 	})
 }
 

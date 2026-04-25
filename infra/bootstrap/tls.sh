@@ -111,7 +111,7 @@ server {
         proxy_set_header   X-Real-IP \$remote_addr;
         proxy_set_header   X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto \$scheme;
-        add_header         Access-Control-Allow-Origin "https://dash.${DOMAIN}";
+        # CORS is handled by the Go backend (DASH_ORIGIN env var); do not add a static header here.
     }
 }
 EOF

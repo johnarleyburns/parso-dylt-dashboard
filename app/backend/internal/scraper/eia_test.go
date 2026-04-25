@@ -34,7 +34,7 @@ func TestFetchLatest_OK(t *testing.T) {
 	// Since fetchLatest builds its own URL, we use a round-tripper trick instead.
 	c.http = newRedirectClient(srv.URL)
 
-	price, period, unit, err := c.fetchLatest(t.Context(), "petroleum/pri/spt", "EER_ECRWTI_PF4_Y35NY_DPG")
+	price, period, unit, err := c.fetchLatest(t.Context(), "petroleum/pri/spt", seriesWTI)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestFetchAll_PartialSuccess(t *testing.T) {
 		meta   PricePoint
 	}{
 		{seriesWTI, PricePoint{Symbol: "CL", Name: "WTI", Sector: "crude", Unit: "USD/bbl"}},
-		{seriesDubai, PricePoint{Symbol: "DC", Name: "Dubai", Sector: "crude", Unit: "USD/bbl"}},
+		{seriesBrent, PricePoint{Symbol: "BZ", Name: "Brent", Sector: "crude", Unit: "USD/bbl"}},
 	}
 	pts := fetchAll(t.Context(), c, specs)
 	if len(pts) != 1 {

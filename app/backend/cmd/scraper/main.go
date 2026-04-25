@@ -59,10 +59,8 @@ func main() {
 	store.Put(ctx, "/oilfield/nodes/"+nodeName+"/status", "ok")
 
 	eia := scraper.NewEIAClient(eiaKey)
-	ice := scraper.NewICEScraper()
-	cme := scraper.NewCMEScraper()
+	yf  := scraper.NewYahooFinanceScraper()
 	inv := scraper.NewInvestingScraper()
-	jpx := scraper.NewJPXScraper()
 
 	type sectorResult struct {
 		sector string
@@ -104,17 +102,17 @@ func main() {
 	run("electricity/eia", func() []scraper.PricePoint { return eia.ScrapeElectricity(ctx) })
 	run("refined/eia", func() []scraper.PricePoint { return eia.ScrapeRefined(ctx) })
 
-	// HTML scrapers (best-effort; failures logged and skipped)
-	// Inter-request delay to avoid hammering — Failure Case #4 prevention.
-	time.Sleep(2 * time.Second)
-	runSingle("crude/brent", func() (scraper.PricePoint, error) { return ice.ScrapeBrent(ctx) })
-	runSingle("crude/wtimidland", func() (scraper.PricePoint, error) { return cme.ScrapeWTIMidland(ctx) })
-	runSingle("crude/tocom", func() (scraper.PricePoint, error) { return jpx.ScrapeTOCOM(ctx) })
-	runSingle("refined/gasoil", func() (scraper.PricePoint, error) { return ice.ScrapeGasoil(ctx) })
-	runSingle("lng/europe", func() (scraper.PricePoint, error) { return ice.ScrapeLNGEurope(ctx) })
+	// Yahoo Finance scrapers — JSON API, no CSS selectors, resilient to exchange site changes.
+	// Provides front-month futures prices as a complement to EIA spot prices.
+	runSingle("crude/wti_fut", func() (scraper.PricePoint, error) { return yf.ScrapeWTI(ctx) })
+	runSingle("crude/brent_fut", func() (scraper.PricePoint, error) { return yf.ScrapeBrent(ctx) })
+	runSingle("natgas/hh_fut", func() (scraper.PricePoint, error) { return yf.ScrapeNatGas(ctx) })
+	runSingle("natgas/ttf_fut", func() (scraper.PricePoint, error) { return yf.ScrapeTTF(ctx) })
+	runSingle("refined/ho_fut", func() (scraper.PricePoint, error) { return yf.ScrapeHeatingOil(ctx) })
+	runSingle("refined/rb_fut", func() (scraper.PricePoint, error) { return yf.ScrapeRBOB(ctx) })
+
+	// Investing.com HTML scraper — best-effort for TTF spot (cross-check against YF futures).
 	runSingle("natgas/ttf", func() (scraper.PricePoint, error) { return inv.ScrapeTTF(ctx) })
-	runSingle("natgas/nbp", func() (scraper.PricePoint, error) { return inv.ScrapeNBP(ctx) })
-	runSingle("lpg/europe", func() (scraper.PricePoint, error) { return inv.ScrapePropaneEurope(ctx) })
 
 	// News RSS (gofeed — reliable, rate-limit friendly)
 	wg.Add(2)

@@ -161,7 +161,7 @@ export default function EnergyCurve3D({ prices, visibleSectors }: EnergyCurve3DP
       })
 
       for (const [symbol, symbolPts] of bySymbol) {
-        curves.push({
+        result.push({
           key: `${sector}-${symbol}`,
           points: buildPoints(symbolPts, zIndex, baseMonth),
           color: SECTOR_COLORS[sector] ?? '#94a3b8',
