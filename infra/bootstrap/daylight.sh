@@ -7,6 +7,7 @@ set -euo pipefail
 # Required env vars (pass before bash -s):
 #   N1_IP, N2_IP, N3_IP     — public IPs from infra/state/*.ip
 #   ETCD_CLUSTER_TOKEN       — from infra/.env
+#   EIA_API_KEY              — from infra/.env
 #   DOMAIN                   — from infra/.env
 #
 # NODE_NAME and NODE_ROLE are read from /etc/daylight/node.conf (written by base.sh).
@@ -17,6 +18,7 @@ N1_IP="${N1_IP:?N1_IP must be set}"
 N2_IP="${N2_IP:?N2_IP must be set}"
 N3_IP="${N3_IP:?N3_IP must be set}"
 ETCD_CLUSTER_TOKEN="${ETCD_CLUSTER_TOKEN:?ETCD_CLUSTER_TOKEN must be set}"
+EIA_API_KEY="${EIA_API_KEY:?EIA_API_KEY must be set}"
 DOMAIN="${DOMAIN:-$DOMAIN}"
 
 log() { echo "[daylight] $*" >&2; }
@@ -85,6 +87,12 @@ log-level: 'warn'
 EOF
 chmod 640 /etc/etcd/etcd.conf.yml
 chown root:etcd /etc/etcd/etcd.conf.yml
+
+# Persist EIA_API_KEY into node.conf so scraper service picks it up via EnvironmentFile
+if ! grep -q EIA_API_KEY /etc/daylight/node.conf; then
+  echo "EIA_API_KEY=$EIA_API_KEY" >> /etc/daylight/node.conf
+fi
+chmod 644 /etc/daylight/node.conf
 
 # etcd systemd unit
 log "Writing etcd.service..."

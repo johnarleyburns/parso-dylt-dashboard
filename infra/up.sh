@@ -59,7 +59,7 @@ N4_IP="$(cat "$SCRIPT_DIR/state/upcloud.ip")"
 echo ""
 echo "  Node IPs:"
 echo "    N1 (Hetzner)  $N1_IP"
-echo "    N2 (Kamatera) $N2_IP"
+echo "    N2 (Linode)   $N2_IP"
 echo "    N3 (Scaleway) $N3_IP"
 echo "    N4 (UpCloud)  $N4_IP"
 
@@ -71,7 +71,7 @@ for NODE_IP in "$N1_IP" "$N2_IP" "$N3_IP"; do
   step "daylight.sh on $NODE_IP..."
   ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -i "$SSH_PRIVATE_KEY_PATH" \
     "root@$NODE_IP" \
-    "N1_IP=$N1_IP N2_IP=$N2_IP N3_IP=$N3_IP ETCD_CLUSTER_TOKEN=$ETCD_CLUSTER_TOKEN DOMAIN=$DOMAIN bash -s" \
+    "N1_IP=$N1_IP N2_IP=$N2_IP N3_IP=$N3_IP ETCD_CLUSTER_TOKEN=$ETCD_CLUSTER_TOKEN EIA_API_KEY=$EIA_API_KEY DOMAIN=$DOMAIN bash -s" \
     < "$SCRIPT_DIR/bootstrap/daylight.sh" &
 done
 
