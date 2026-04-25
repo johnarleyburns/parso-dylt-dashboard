@@ -45,6 +45,7 @@ echo "==> Building React frontend..."
 
 echo "==> Deploying frontend to Cloudflare Pages (project: ${CF_PAGES_PROJECT})..."
 CLOUDFLARE_API_TOKEN="$CLOUDFLARE_API_TOKEN" \
+CLOUDFLARE_ACCOUNT_ID="$CF_ACCOUNT_ID" \
   npx wrangler pages deploy "$FRONTEND_DIR/dist" \
     --project-name "$CF_PAGES_PROJECT" \
     --commit-dirty=true
