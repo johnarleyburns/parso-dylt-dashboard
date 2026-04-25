@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -30,18 +31,62 @@ func NewServer(store Store, nodeName, provider string) *Server {
 }
 
 func (s *Server) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v1/health", s.health)
-	mux.HandleFunc("GET /api/v1/prices/all", s.pricesAll)
-	mux.HandleFunc("GET /api/v1/prices/{sector}", s.pricesSector)
-	mux.HandleFunc("GET /api/v1/news", s.news)
-	mux.HandleFunc("GET /api/v1/cluster", s.cluster)
+	mux.HandleFunc("GET /api/v1/health", s.withCORS(s.health))
+	mux.HandleFunc("GET /api/v1/prices/all", s.withCORS(s.pricesAll))
+	mux.HandleFunc("GET /api/v1/prices/{sector}", s.withCORS(s.pricesSector))
+	mux.HandleFunc("GET /api/v1/news", s.withCORS(s.news))
+	mux.HandleFunc("GET /api/v1/cluster", s.withCORS(s.cluster))
+	// Preflight handler for cross-origin requests
+	mux.HandleFunc("OPTIONS /api/v1/", s.preflight)
+}
+
+func (s *Server) withCORS(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		setCORS(w, r)
+		h(w, r)
+	}
+}
+
+func (s *Server) preflight(w http.ResponseWriter, r *http.Request) {
+	setCORS(w, r)
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// allowedOrigins reads CORS_ORIGIN from the environment on each call so that
+// tests can override it with t.Setenv without a package-level cache invalidation.
+func allowedOrigins() map[string]bool {
+	raw := os.Getenv("CORS_ORIGIN")
+	if raw == "" {
+		raw = "https://oilfield-dash.parso.guru,https://oilfield-dash.pages.dev"
+	}
+	m := make(map[string]bool)
+	for _, o := range strings.Split(raw, ",") {
+		if o = strings.TrimSpace(o); o != "" {
+			m[o] = true
+		}
+	}
+	return m
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Vary", "Origin")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
+}
+
+// setCORS sets Access-Control-Allow-Origin if the request origin is in the allowlist.
+func setCORS(w http.ResponseWriter, r *http.Request) {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return
+	}
+	ao := allowedOrigins()
+	if ao["*"] || ao[origin] {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+	}
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {

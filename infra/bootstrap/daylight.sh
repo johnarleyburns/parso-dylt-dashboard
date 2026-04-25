@@ -92,7 +92,8 @@ chown root:etcd /etc/etcd/etcd.conf.yml
 if ! grep -q EIA_API_KEY /etc/daylight/node.conf; then
   echo "EIA_API_KEY=$EIA_API_KEY" >> /etc/daylight/node.conf
 fi
-chmod 644 /etc/daylight/node.conf
+chmod 640 /etc/daylight/node.conf
+chown root:deploy /etc/daylight/node.conf
 
 # etcd systemd unit
 log "Writing etcd.service..."

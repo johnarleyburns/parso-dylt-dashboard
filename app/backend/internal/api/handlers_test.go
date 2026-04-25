@@ -298,12 +298,33 @@ func TestCORSHeaderPresent(t *testing.T) {
 	srv := newTestServer(newMockStore(true))
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL + "/api/v1/health")
+	// Send a request with an allowed origin — header should be echoed back.
+	t.Setenv("CORS_ORIGIN", "https://test.example.com")
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/v1/health", nil)
+	req.Header.Set("Origin", "https://test.example.com")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	if resp.Header.Get("Access-Control-Allow-Origin") != "*" {
-		t.Errorf("expected CORS header, got %q", resp.Header.Get("Access-Control-Allow-Origin"))
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "https://test.example.com" {
+		t.Errorf("allowed origin: got %q, want %q", got, "https://test.example.com")
+	}
+}
+
+func TestCORSHeaderBlockedUnknownOrigin(t *testing.T) {
+	srv := newTestServer(newMockStore(true))
+	defer srv.Close()
+
+	t.Setenv("CORS_ORIGIN", "https://allowed.example.com")
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/v1/health", nil)
+	req.Header.Set("Origin", "https://evil.example.com")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "" {
+		t.Errorf("blocked origin should get no CORS header, got %q", got)
 	}
 }
