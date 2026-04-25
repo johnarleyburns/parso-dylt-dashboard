@@ -10,7 +10,7 @@ import (
 
 const (
 	eiaRSSURL = "https://www.eia.gov/rss/todayinenergy.xml"
-	ieaRSSURL = "https://www.iea.org/api/news/rss"
+	oilpriceRSSURL = "https://oilprice.com/rss/main"
 
 	maxNewsItems = 150
 )

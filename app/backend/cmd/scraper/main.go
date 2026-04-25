@@ -134,9 +134,9 @@ func main() {
 	}()
 	go func() {
 		defer wg.Done()
-		items, err := scraper.ScrapeNewsRSS(ctx, "https://www.iea.org/api/news/rss", "IEA")
+		items, err := scraper.ScrapeNewsRSS(ctx, "https://oilprice.com/rss/main", "OilPrice")
 		if err != nil {
-			log.Printf("[%s] IEA RSS error: %v", nodeName, err)
+			log.Printf("[%s] OilPrice RSS error: %v", nodeName, err)
 			return
 		}
 		var existing []scraper.NewsItem
