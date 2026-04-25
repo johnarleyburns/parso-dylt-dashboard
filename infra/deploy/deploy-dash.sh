@@ -52,5 +52,5 @@ CLOUDFLARE_ACCOUNT_ID="$CF_ACCOUNT_ID" \
 
 echo ""
 echo "==> Dashboard deployed."
-echo "    Frontend: https://dash.${DOMAIN}"
+echo "    Frontend: https://oilfield-dash.${DOMAIN}"
 echo "    Backend:  https://ctrl.${DOMAIN}"

@@ -290,7 +290,7 @@ func sshBounce(ctx context.Context, node, domain, sshKey string) error {
 // ---- HTTP helpers ----
 
 func cors(w http.ResponseWriter, r *http.Request) {
-	allowed := strings.Split(envOr("DASH_ORIGIN", "https://dash.oilfield.parso.guru"), ",")
+	allowed := strings.Split(envOr("DASH_ORIGIN", "https://oilfield-dash.parso.guru"), ",")
 	reqOrigin := r.Header.Get("Origin")
 	for _, o := range allowed {
 		if strings.TrimSpace(o) == reqOrigin {
