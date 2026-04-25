@@ -76,6 +76,7 @@ export default function NodeDetailDrawer({ node, onClose, mobile }: Props) {
 
     const ctrl = new AbortController()
     const { signal } = ctrl
+    const timer = setTimeout(() => ctrl.abort(), 10_000)
 
     Promise.all([
       fetch(`${API_BASE}/api/v1/nodes/${node.name}/metrics`, { signal })
@@ -86,9 +87,9 @@ export default function NodeDetailDrawer({ node, onClose, mobile }: Props) {
         .then(r => r.ok ? r.json() : Promise.reject(`HTTP ${r.status}`))
         .then((d: LogsResponse) => setLogs(d.lines ?? []))
         .catch((e) => { if ((e as Error).name !== 'AbortError') setLogsErr(String(e)) }),
-    ]).finally(() => setLoading(false))
+    ]).finally(() => { setLoading(false); clearTimeout(timer) })
 
-    return () => ctrl.abort()
+    return () => { ctrl.abort(); clearTimeout(timer) }
   }, [node])
 
   // Auto-scroll log to bottom when lines update

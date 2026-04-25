@@ -236,8 +236,8 @@ func (e *EIAClient) ScrapeLPG(ctx context.Context) []PricePoint {
 // EIA no longer publishes daily Mont Belvieu NGL spot prices via API v2; returns empty.
 func (e *EIAClient) ScrapeNGLs(_ context.Context) []PricePoint { return nil }
 
-// ScrapeElectricity returns EIA RTO day-ahead price points.
-// Uses electricity/rto/daily-region-data — verify facet names against EIA API browser.
+// ScrapeElectricity returns EIA RTO day-ahead price history (90 days, oldest-first).
+// Fetches all RTOs concurrently. Uses electricity/rto/daily-region-data.
 func (e *EIAClient) ScrapeElectricity(ctx context.Context) []PricePoint {
 	type rtoSpec struct {
 		respondent string
@@ -253,42 +253,59 @@ func (e *EIAClient) ScrapeElectricity(ctx context.Context) []PricePoint {
 		{"NYISO", "NYZA", "NYISO Zone A", "US_NORTHEAST"},
 	}
 
+	const historyDays = 90
 	now := time.Now().UTC()
-	var points []PricePoint
+	ch := make(chan []PricePoint, len(rtos))
+
 	for _, rto := range rtos {
-		url := fmt.Sprintf(
-			"https://api.eia.gov/v2/electricity/rto/daily-region-data/data/?api_key=%s&frequency=daily&data[0]=value&facets[respondent][]=%s&facets[type][]=DF&sort[0][column]=period&sort[0][direction]=desc&length=1",
-			e.apiKey, rto.respondent,
-		)
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-		if err != nil {
-			continue
-		}
-		resp, err := e.http.Do(req)
-		if err != nil {
-			continue
-		}
-		var r eiaResp
-		if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		rto := rto
+		go func() {
+			url := fmt.Sprintf(
+				"https://api.eia.gov/v2/electricity/rto/daily-region-data/data/?api_key=%s&frequency=daily&data[0]=value&facets[respondent][]=%s&facets[type][]=DF&sort[0][column]=period&sort[0][direction]=desc&length=%d",
+				e.apiKey, rto.respondent, historyDays,
+			)
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+			if err != nil {
+				ch <- nil
+				return
+			}
+			resp, err := e.http.Do(req)
+			if err != nil {
+				ch <- nil
+				return
+			}
+			var r eiaResp
+			if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+				resp.Body.Close()
+				ch <- nil
+				return
+			}
 			resp.Body.Close()
-			continue
-		}
-		resp.Body.Close()
-		if len(r.Response.Data) == 0 {
-			continue
-		}
-		d := r.Response.Data[0]
-		v, err := parseEIAValue(d.Value)
-		if err != nil || v <= 0 {
-			continue
-		}
-		points = append(points, PricePoint{
-			Symbol: rto.symbol, Name: rto.name, Sector: "electricity",
-			Exchange: "RTO", Geography: rto.geography, DeliveryMonth: d.Period,
-			Price: v, Unit: "USD/MWh", ScrapedAt: now, Source: "eia_api",
-		})
+
+			// Reverse so points are oldest-first (natural time order for charting).
+			data := r.Response.Data
+			pts := make([]PricePoint, 0, len(data))
+			for i := len(data) - 1; i >= 0; i-- {
+				d := data[i]
+				v, err := parseEIAValue(d.Value)
+				if err != nil || v <= 0 {
+					continue
+				}
+				pts = append(pts, PricePoint{
+					Symbol: rto.symbol, Name: rto.name, Sector: "electricity",
+					Exchange: "RTO", Geography: rto.geography, DeliveryMonth: d.Period,
+					Price: v, Unit: "USD/MWh", ScrapedAt: now, Source: "eia_api",
+				})
+			}
+			ch <- pts
+		}()
 	}
-	return points
+
+	var all []PricePoint
+	for range rtos {
+		all = append(all, <-ch...)
+	}
+	return all
 }
 
 // ScrapeRefined returns EIA-sourced refined product price points.

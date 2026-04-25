@@ -52,11 +52,18 @@ function useMobile(): boolean {
 }
 
 async function apiFetch<T>(path: string): Promise<T> {
-  const resp = await fetch(API_BASE + path, {
-    headers: { Accept: 'application/json' },
-  })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status} from ${path}`)
-  return resp.json() as Promise<T>
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), 10_000)
+  try {
+    const resp = await fetch(API_BASE + path, {
+      headers: { Accept: 'application/json' },
+      signal: ctrl.signal,
+    })
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} from ${path}`)
+    return resp.json() as Promise<T>
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 export default function App() {

@@ -473,3 +473,200 @@ func TestAdmin_BounceNode_RejectsUnknown(t *testing.T) {
 		t.Errorf("unknown node: got %d, want 400", w.Code)
 	}
 }
+
+// ---- parseMetrics ----
+
+func TestParseMetrics_FullOutput(t *testing.T) {
+	// Simulates: cat /proc/loadavg; free -m; awk '{print $1}' /proc/uptime
+	raw := "0.42 0.35 0.28 1/342 12345\n" +
+		"               total        used        free      shared  buff/cache   available\n" +
+		"Mem:            7980        3241        1523         234        3215        4263\n" +
+		"Swap:           2047           0        2047\n" +
+		"86400.5\n"
+
+	m := parseMetrics(raw)
+
+	if m.Load1 != 0.42 {
+		t.Errorf("Load1: got %v, want 0.42", m.Load1)
+	}
+	if m.Load5 != 0.35 {
+		t.Errorf("Load5: got %v, want 0.35", m.Load5)
+	}
+	if m.Load15 != 0.28 {
+		t.Errorf("Load15: got %v, want 0.28", m.Load15)
+	}
+	if m.MemTotalMB != 7980 {
+		t.Errorf("MemTotalMB: got %v, want 7980", m.MemTotalMB)
+	}
+	if m.MemUsedMB != 3241 {
+		t.Errorf("MemUsedMB: got %v, want 3241", m.MemUsedMB)
+	}
+	if m.MemUsedPct < 40 || m.MemUsedPct > 41 {
+		t.Errorf("MemUsedPct: got %.2f, want ~40.6", m.MemUsedPct)
+	}
+	if m.UptimeSeconds != 86400 {
+		t.Errorf("UptimeSeconds: got %v, want 86400", m.UptimeSeconds)
+	}
+}
+
+func TestParseMetrics_FreeHeaderDoesNotCorruptLoad(t *testing.T) {
+	// Ensure "total used free shared..." header doesn't get parsed as load avg
+	raw := "0.10 0.20 0.30 1/100 999\n" +
+		"               total        used        free\n" +
+		"Mem:            1024         512         512\n" +
+		"Swap:           1024           0        1024\n" +
+		"3600.0\n"
+
+	m := parseMetrics(raw)
+	if m.Load1 != 0.10 || m.Load5 != 0.20 || m.Load15 != 0.30 {
+		t.Errorf("loads corrupted: got %v %v %v, want 0.10 0.20 0.30", m.Load1, m.Load5, m.Load15)
+	}
+}
+
+// ---- /api/v1/nodes ----
+
+func TestHandler_Nodes_MergesHealthAndGeo(t *testing.T) {
+	// Serve a health response from a fake n1
+	n1srv := httptest.NewServer(serveJSON(NodeHealth{
+		Node: "n1", Status: "ok", Provider: "hetzner", EtcdHealthy: true,
+	}))
+	defer n1srv.Close()
+
+	agg := newAggregator([]RuntimeNode{
+		{Name: "n1", BaseURL: n1srv.URL},
+		{Name: "n2", BaseURL: "http://127.0.0.1:1"}, // unreachable
+	})
+
+	// Override geo to only 2 nodes so we can make targeted assertions
+	t.Setenv("DAYLIGHT_NODE_GEO", `[
+		{"name":"n1","lat":49.45,"lon":11.08,"city":"Nuremberg","country":"DE","provider":"Hetzner","role":"runtime"},
+		{"name":"n2","lat":40.74,"lon":-74.18,"city":"Newark","country":"US","provider":"Linode","role":"runtime"}
+	]`)
+
+	h := makeHandler(agg, nil)
+	r := httptest.NewRequest("GET", "/api/v1/nodes", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200", w.Code)
+	}
+
+	var nodes []NodeInfo
+	if err := json.NewDecoder(w.Body).Decode(&nodes); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(nodes) != 2 {
+		t.Fatalf("expected 2 nodes, got %d", len(nodes))
+	}
+
+	byName := make(map[string]NodeInfo)
+	for _, n := range nodes {
+		byName[n.Name] = n
+	}
+
+	n1 := byName["n1"]
+	if n1.Status != "ok" {
+		t.Errorf("n1 status: got %q, want ok", n1.Status)
+	}
+	if !n1.EtcdHealthy {
+		t.Error("n1: expected etcd_healthy=true")
+	}
+	if n1.City != "Nuremberg" {
+		t.Errorf("n1 city: got %q, want Nuremberg", n1.City)
+	}
+
+	n2 := byName["n2"]
+	if n2.Status != "offline" {
+		t.Errorf("n2 status: got %q, want offline", n2.Status)
+	}
+}
+
+func TestHandler_Nodes_CtrlRoleKeepsCtrlStatus(t *testing.T) {
+	t.Setenv("DAYLIGHT_NODE_GEO", `[
+		{"name":"n4","lat":60.17,"lon":24.94,"city":"Helsinki","country":"FI","provider":"UpCloud","role":"ctrl"}
+	]`)
+
+	// Aggregator has no nodes for n4 (ctrl isn't in the runtime set)
+	h := makeHandler(newAggregator(nil), nil)
+	r := httptest.NewRequest("GET", "/api/v1/nodes", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+
+	var nodes []NodeInfo
+	json.NewDecoder(w.Body).Decode(&nodes)
+	if len(nodes) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(nodes))
+	}
+	if nodes[0].Status != "ctrl" {
+		t.Errorf("ctrl node status: got %q, want ctrl", nodes[0].Status)
+	}
+}
+
+func TestHandler_Nodes_CachedSecondRequest(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		serveJSON(NodeHealth{Node: "n1", Status: "ok"})(w, r)
+	}))
+	defer srv.Close()
+
+	t.Setenv("DAYLIGHT_NODE_GEO", `[{"name":"n1","lat":0,"lon":0,"city":"X","country":"US","provider":"P","role":"runtime"}]`)
+	agg := newAggregator([]RuntimeNode{{Name: "n1", BaseURL: srv.URL}})
+	h := makeHandler(agg, nil)
+
+	for i := 0; i < 3; i++ {
+		r := httptest.NewRequest("GET", "/api/v1/nodes", nil)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("request %d: got %d, want 200", i, w.Code)
+		}
+	}
+	// Cache TTL is 15s; all 3 requests hit within <1ms so only 1 upstream call expected.
+	if calls != 1 {
+		t.Errorf("expected 1 upstream health call (cache hit), got %d", calls)
+	}
+}
+
+// ---- /api/v1/nodes/{name}/metrics and /logs ----
+
+// TestHandler_NodeMetrics_BadGatewayOnSSHFailure verifies the metrics endpoint
+// returns 502 when SSH is unreachable. It uses a known-invalid hostname that
+// fails immediately via NXDOMAIN or connection refused.
+func TestHandler_NodeMetrics_BadGatewayOnSSHFailure(t *testing.T) {
+	// Use a domain that will never resolve — guaranteed NXDOMAIN per RFC 2606.
+	t.Setenv("OILFIELD_DOMAIN", "invalid")
+	h := makeHandler(newAggregator(nil), nil)
+
+	r := httptest.NewRequest("GET", "/api/v1/nodes/n1/metrics", nil)
+	// Give SSH 5s to fail; on most systems NXDOMAIN is <1s.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadGateway {
+		t.Errorf("expected 502, got %d (body: %s)", w.Code, readBody(t, w))
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("content-type: got %q, want application/json", ct)
+	}
+}
+
+func TestHandler_NodeLogs_BadGatewayOnSSHFailure(t *testing.T) {
+	t.Setenv("OILFIELD_DOMAIN", "invalid")
+	h := makeHandler(newAggregator(nil), nil)
+
+	r := httptest.NewRequest("GET", "/api/v1/nodes/n1/logs", nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadGateway {
+		t.Errorf("expected 502, got %d (body: %s)", w.Code, readBody(t, w))
+	}
+}

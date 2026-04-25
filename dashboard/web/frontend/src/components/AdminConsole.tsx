@@ -3,6 +3,7 @@ import { X, RefreshCw, Shield } from 'lucide-react'
 import WorldMap, { type NodeInfo } from './WorldMap'
 import NodeGrid from './NodeGrid'
 import NodeDetailDrawer from './NodeDetailDrawer'
+import MapErrorBoundary from './MapErrorBoundary'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'https://ctrl.oilfield.parso.guru'
 const REFRESH_MS = 15_000
@@ -21,9 +22,12 @@ export default function AdminConsole({ onClose, mobile }: Props) {
   const [error, setError]           = useState<string | null>(null)
 
   async function fetchNodes() {
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 10_000)
     try {
       const resp = await fetch(`${API_BASE}/api/v1/nodes`, {
         headers: { Accept: 'application/json' },
+        signal: ctrl.signal,
       })
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
       const data: NodeInfo[] = await resp.json()
@@ -32,6 +36,8 @@ export default function AdminConsole({ onClose, mobile }: Props) {
       setError(null)
     } catch (e) {
       setError(String(e))
+    } finally {
+      clearTimeout(timer)
     }
   }
 
@@ -180,11 +186,13 @@ export default function AdminConsole({ onClose, mobile }: Props) {
             {error ? `⚠ ${error}` : '// SCANNING CLUSTER …'}
           </div>
         ) : (
-          <WorldMap
-            nodes={nodes}
-            selectedNode={selectedNode}
-            onSelectNode={(name) => setSelectedNode(prev => prev === name ? null : name)}
-          />
+          <MapErrorBoundary>
+            <WorldMap
+              nodes={nodes}
+              selectedNode={selectedNode}
+              onSelectNode={(name) => setSelectedNode(prev => prev === name ? null : name)}
+            />
+          </MapErrorBoundary>
         )}
         {/* Corner decorations */}
         <div style={{ position: 'absolute', top: 4, left: 4, width: 10, height: 10, borderTop: `1px solid ${NEON_CYAN}`, borderLeft: `1px solid ${NEON_CYAN}`, opacity: 0.4, pointerEvents: 'none' }} />
@@ -194,7 +202,7 @@ export default function AdminConsole({ onClose, mobile }: Props) {
       </div>
 
       {/* ---- Node grid ---- */}
-      <div style={{ flex: 1, overflow: 'auto', WebkitOverflowScrolling: 'touch' as never }}>
+      <div style={{ flex: 1, overflow: 'auto' }}>
         <div style={{
           padding: '0.3rem 0.75rem 0.2rem',
           color: '#1a4a5a',

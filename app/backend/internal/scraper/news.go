@@ -8,12 +8,7 @@ import (
 	"github.com/mmcdole/gofeed"
 )
 
-const (
-	eiaRSSURL = "https://www.eia.gov/rss/todayinenergy.xml"
-	oilpriceRSSURL = "https://oilprice.com/rss/main"
-
-	maxNewsItems = 150
-)
+const maxNewsItems = 150
 
 // ScrapeNewsRSS fetches RSS from the given URL and returns NewsItems.
 // source is the label written to NewsItem.Source ("EIA" or "IEA").

@@ -261,13 +261,13 @@ func etcdKey(k string) string { return base64.StdEncoding.EncodeToString([]byte(
 func etcdVal(v string) string { return base64.StdEncoding.EncodeToString([]byte(v)) }
 
 func (a *Admin) etcdDelete(ctx context.Context, key string) error {
-	body := fmt.Sprintf(`{"key":%q}`, etcdKey(key))
-	return a.etcdPost(ctx, "/v3/kv/deleterange", body)
+	b, _ := json.Marshal(map[string]string{"key": etcdKey(key)})
+	return a.etcdPost(ctx, "/v3/kv/deleterange", string(b))
 }
 
 func (a *Admin) etcdPut(ctx context.Context, key, value string) error {
-	body := fmt.Sprintf(`{"key":%q,"value":%q}`, etcdKey(key), etcdVal(value))
-	return a.etcdPost(ctx, "/v3/kv/put", body)
+	b, _ := json.Marshal(map[string]string{"key": etcdKey(key), "value": etcdVal(value)})
+	return a.etcdPost(ctx, "/v3/kv/put", string(b))
 }
 
 // sshBounce restarts oilfield services on a runtime node via SSH.
@@ -402,8 +402,9 @@ func parseMetrics(raw string) NodeMetrics {
 			if n, _ := fmt.Sscanf(fields[0], "%f", &sec); n == 1 && sec > 0 {
 				m.UptimeSeconds = int64(sec)
 			}
-		case len(fields) >= 3:
+		case len(fields) >= 3 && fields[0] != "Swap:" && fields[0] != "total":
 			// /proc/loadavg: "0.42 0.35 0.28 1/342 12345"
+			// Exclude free -m header ("total used free ...") and Swap row.
 			var l1, l5, l15 float64
 			if n, _ := fmt.Sscanf(line, "%f %f %f", &l1, &l5, &l15); n == 3 {
 				m.Load1, m.Load5, m.Load15 = l1, l5, l15

@@ -38,7 +38,9 @@ func main() {
 	}
 	defer store.Close()
 
-	ctx := context.Background()
+	// 8-minute ceiling keeps scrape cycles from overlapping (timer fires every 5 min).
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
+	defer cancel()
 	const lockKey = "/oilfield/locks/scrape"
 
 	// ⚠️ LEASE-BACKED LOCK — TTL=120s ensures auto-release on crash.
@@ -153,7 +155,8 @@ func main() {
 		close(results)
 	}()
 
-	// Accumulate price results by sector (merge EIA + HTML into same sector key)
+	// Accumulate price results by sector (merge EIA + HTML into same sector key).
+	// Single-goroutine consumer of a closed channel — no mutex needed.
 	sectorPrices := make(map[string][]scraper.PricePoint)
 	for r := range results {
 		// Strip the source suffix (e.g. "crude/eia" → "crude")
