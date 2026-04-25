@@ -31,8 +31,8 @@ step "Hetzner  (N1 — runtime, Ashburn VA)..."
 bash "$SCRIPT_DIR/provision/hetzner.sh" &
 PID_N1=$!
 
-step "Kamatera (N2 — runtime, Los Angeles CA)..."
-bash "$SCRIPT_DIR/provision/kamatera.sh" &
+step "Linode   (N2 — runtime, Los Angeles CA)..."
+bash "$SCRIPT_DIR/provision/linode.sh" &
 PID_N2=$!
 
 step "Scaleway (N3 — runtime, Paris FR)..."
@@ -46,13 +46,13 @@ PID_N4=$!
 # Wait for all four; abort if any fail
 FAIL=0
 wait $PID_N1 || { echo "  ✗ Hetzner provision failed"  >&2 ; FAIL=1 ; }
-wait $PID_N2 || { echo "  ✗ Kamatera provision failed" >&2 ; FAIL=1 ; }
+wait $PID_N2 || { echo "  ✗ Linode provision failed" >&2 ; FAIL=1 ; }
 wait $PID_N3 || { echo "  ✗ Scaleway provision failed" >&2 ; FAIL=1 ; }
 wait $PID_N4 || { echo "  ✗ UpCloud provision failed"  >&2 ; FAIL=1 ; }
 [ "$FAIL" -eq 0 ] || die "One or more provision scripts failed — see output above"
 
 N1_IP="$(cat "$SCRIPT_DIR/state/hetzner.ip")"
-N2_IP="$(cat "$SCRIPT_DIR/state/kamatera.ip")"
+N2_IP="$(cat "$SCRIPT_DIR/state/linode.ip")"
 N3_IP="$(cat "$SCRIPT_DIR/state/scaleway.ip")"
 N4_IP="$(cat "$SCRIPT_DIR/state/upcloud.ip")"
 

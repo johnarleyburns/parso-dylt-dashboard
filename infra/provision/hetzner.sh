@@ -6,7 +6,7 @@ source "$SCRIPT_DIR/../.env"
 
 NODE_NAME="n1"
 SERVER_NAME="oilfield-n1"
-SERVER_TYPE="cx22"
+SERVER_TYPE="cpx11"
 LOCATION="ash"   # Ashburn, VA
 IMAGE="ubuntu-24.04"
 
@@ -82,6 +82,15 @@ NODE_IP=$(curl -s \
 mkdir -p "$SCRIPT_DIR/../state"
 echo "$NODE_IP" > "$SCRIPT_DIR/../state/hetzner.ip"
 log "Server running at $NODE_IP — written to infra/state/hetzner.ip"
+
+# Wait for SSH to be ready (server reports 'running' before sshd starts)
+log "Waiting for SSH on $NODE_IP..."
+for i in $(seq 1 30); do
+  ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -i "$SSH_PRIVATE_KEY_PATH" "root@$NODE_IP" true 2>/dev/null && break
+  [ "$i" -lt 30 ] || die "SSH not ready on $NODE_IP after 150s"
+  log "  SSH not ready — retrying in 5s ($i/30)..."
+  sleep 5
+done
 
 # Run base bootstrap over SSH
 log "Running base bootstrap on $NODE_IP..."

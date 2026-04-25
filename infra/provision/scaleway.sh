@@ -19,7 +19,7 @@ AUTH_HEADER="X-Auth-Token: $SCW_SECRET_KEY"
 log "Resolving Ubuntu 24.04 image ID..."
 IMAGE_ID=$(curl -s \
   -H "$AUTH_HEADER" \
-  "$BASE_URL/images?name=$IMAGE_LABEL&arch=x86_64" \
+  "$BASE_URL/images?arch=x86_64&per_page=100" \
   | jq -r '[.images[] | select(.name | startswith("Ubuntu 24.04"))] | sort_by(.creation_date) | last | .id // empty')
 [ -n "$IMAGE_ID" ] || die "Could not find Ubuntu 24.04 image in zone $SCW_ZONE"
 log "Image ID: $IMAGE_ID"
@@ -31,7 +31,7 @@ SSH_PUBLIC_KEY="$(cat "$SSH_PUBLIC_KEY_PATH")"
 log "Checking for existing SSH key..."
 EXISTING_KEY_ID=$(curl -s \
   -H "$AUTH_HEADER" \
-  "https://api.scaleway.com/account/v3/ssh-keys?name=$SSH_KEY_NAME&project_id=$SCW_PROJECT_ID" \
+  "https://api.scaleway.com/iam/v1alpha1/ssh-keys?name=$SSH_KEY_NAME" \
   | jq -r '.ssh_keys[0].id // empty')
 
 if [ -n "$EXISTING_KEY_ID" ]; then
@@ -43,8 +43,8 @@ else
     -H "$AUTH_HEADER" \
     -H "Content-Type: application/json" \
     -d "{\"name\":\"$SSH_KEY_NAME\",\"public_key\":\"$SSH_PUBLIC_KEY\",\"project_id\":\"$SCW_PROJECT_ID\"}" \
-    "https://api.scaleway.com/account/v3/ssh-keys" \
-    | jq -r '.ssh_key.id // empty')
+    "https://api.scaleway.com/iam/v1alpha1/ssh-keys" \
+    | jq -r '.id // empty')
   [ -n "$SSH_KEY_ID" ] || die "Failed to upload SSH key"
   log "SSH key uploaded (id=$SSH_KEY_ID)"
 fi
@@ -99,6 +99,15 @@ NODE_IP=$(curl -s \
 mkdir -p "$SCRIPT_DIR/../state"
 echo "$NODE_IP" > "$SCRIPT_DIR/../state/scaleway.ip"
 log "Server running at $NODE_IP — written to infra/state/scaleway.ip"
+
+# Wait for SSH to be ready
+log "Waiting for SSH on $NODE_IP..."
+for i in $(seq 1 30); do
+  ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -i "$SSH_PRIVATE_KEY_PATH" "root@$NODE_IP" true 2>/dev/null && break
+  [ "$i" -lt 30 ] || die "SSH not ready on $NODE_IP after 150s"
+  log "  SSH not ready — retrying in 5s ($i/30)..."
+  sleep 5
+done
 
 # Run base bootstrap over SSH
 log "Running base bootstrap on $NODE_IP..."

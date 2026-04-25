@@ -6,7 +6,7 @@ source "$SCRIPT_DIR/../.env"
 
 NODE_NAME="n4"
 SERVER_TITLE="oilfield-n4"
-PLAN="DEV-1SA"
+PLAN="DEV-1xCPU-2GB"
 ZONE="$UPCLOUD_ZONE"   # us-chi1 (Chicago)
 OS_TEMPLATE="01000000-0000-4000-8000-000030240200"  # Ubuntu 24.04 LTS
 
@@ -43,13 +43,13 @@ RESPONSE=$(curl -s -X POST \
       \"title\": \"$SERVER_TITLE\",
       \"hostname\": \"$SERVER_TITLE\",
       \"plan\": \"$PLAN\",
+      \"metadata\": \"yes\",
       \"storage_devices\": {
         \"storage_device\": [{
           \"action\": \"clone\",
           \"storage\": \"$TEMPLATE_UUID\",
           \"title\": \"$SERVER_TITLE-disk\",
-          \"size\": 10,
-          \"tier\": \"maxiops\"
+          \"size\": 30
         }]
       },
       \"login_user\": {
@@ -93,6 +93,15 @@ NODE_IP=$(curl -s \
 mkdir -p "$SCRIPT_DIR/../state"
 echo "$NODE_IP" > "$SCRIPT_DIR/../state/upcloud.ip"
 log "Server running at $NODE_IP — written to infra/state/upcloud.ip"
+
+# Wait for SSH to be ready
+log "Waiting for SSH on $NODE_IP..."
+for i in $(seq 1 30); do
+  ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -i "$SSH_PRIVATE_KEY_PATH" "root@$NODE_IP" true 2>/dev/null && break
+  [ "$i" -lt 30 ] || die "SSH not ready on $NODE_IP after 150s"
+  log "  SSH not ready — retrying in 5s ($i/30)..."
+  sleep 5
+done
 
 # Run base bootstrap over SSH
 log "Running base bootstrap on $NODE_IP..."

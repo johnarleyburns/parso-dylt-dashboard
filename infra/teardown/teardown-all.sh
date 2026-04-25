@@ -36,7 +36,7 @@ if [ "$YES" != "--yes" ]; then
   echo ""
   echo "  This will DELETE all four oilfield VMs:"
   echo "    Hetzner  oilfield-n1"
-  echo "    Kamatera oilfield-n2"
+  echo "    Linode   oilfield-n2"
   echo "    Scaleway oilfield-n3"
   echo "    UpCloud  oilfield-n4"
   echo ""
@@ -63,40 +63,23 @@ else
   warn "oilfield-n1 not found in Hetzner (already deleted?)"
 fi
 
-# ─── Kamatera: delete oilfield-n2 ─────────────────────────────────────────────
+# ─── Linode: delete oilfield-n2 ──────────────────────────────────────────────
 
-log "Kamatera — deleting oilfield-n2"
+log "Linode — deleting oilfield-n2"
 
-AUTH_TOKEN=$(curl -s -X POST "https://console.kamatera.com/service/authenticate" \
-  -d "clientId=$KAMATERA_CLIENT_ID&secret=$KAMATERA_CLIENT_SECRET" \
-  | jq -r '.authentication // empty')
+LINODE_ID=$(curl -s \
+  -H "Authorization: Bearer $LINODE_TOKEN" \
+  "https://api.linode.com/v4/linode/instances?label=oilfield-n2" \
+  | jq -r '.data[0].id // empty')
 
-if [ -z "$AUTH_TOKEN" ]; then
-  warn "Kamatera auth failed — skipping N2 deletion (delete manually at console.kamatera.com)"
+if [ -n "$LINODE_ID" ]; then
+  step "Found instance id=$LINODE_ID — deleting..."
+  curl -s -X DELETE \
+    -H "Authorization: Bearer $LINODE_TOKEN" \
+    "https://api.linode.com/v4/linode/instances/$LINODE_ID" | jq -r '.[] // "ok"' 2>/dev/null || true
+  ok "oilfield-n2 deleted"
 else
-  AUTH_HEADER="AuthClientId: $KAMATERA_CLIENT_ID"
-  AUTH_KEY_HEADER="AuthToken: $AUTH_TOKEN"
-
-  SERVER_ID=$(curl -s "https://console.kamatera.com/service/servers" \
-    -H "$AUTH_HEADER" \
-    -H "$AUTH_KEY_HEADER" \
-    | jq -r --arg name "oilfield-n2" '.[] | select(.name == $name) | .id // empty' \
-    | head -1)
-
-  if [ -n "$SERVER_ID" ]; then
-    step "Found server id=$SERVER_ID — terminating..."
-    TASK_ID=$(curl -s -X DELETE \
-      "https://console.kamatera.com/service/server/$SERVER_ID" \
-      -H "$AUTH_HEADER" \
-      -H "$AUTH_KEY_HEADER" \
-      -H "Content-Type: application/json" \
-      -d '{"terminate":true,"force":true}' \
-      | jq -r '.[0] // empty')
-    [ -n "$TASK_ID" ] && step "Termination task $TASK_ID queued" || warn "No task ID returned"
-    ok "oilfield-n2 deletion initiated"
-  else
-    warn "oilfield-n2 not found in Kamatera (already deleted?)"
-  fi
+  warn "oilfield-n2 not found in Linode (already deleted?)"
 fi
 
 # ─── Scaleway: delete oilfield-n3 ─────────────────────────────────────────────
@@ -211,7 +194,7 @@ fi
 
 log "Cleaning up state files"
 rm -f "$INFRA_DIR/state/hetzner.ip" \
-       "$INFRA_DIR/state/kamatera.ip" \
+       "$INFRA_DIR/state/linode.ip" \
        "$INFRA_DIR/state/scaleway.ip" \
        "$INFRA_DIR/state/upcloud.ip"
 ok "infra/state/*.ip removed"
