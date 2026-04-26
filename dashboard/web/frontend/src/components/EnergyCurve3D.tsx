@@ -193,22 +193,6 @@ export default function EnergyCurve3D({ prices, visibleSectors }: EnergyCurve3DP
         />
       </Canvas>
 
-      {/* Static legend — plain DOM, no drei Html, no portal leaks */}
-      <div
-        style={{
-          position: 'absolute',
-          bottom: 8,
-          left: 10,
-          fontSize: '0.6rem',
-          color: '#475569',
-          pointerEvents: 'none',
-          fontFamily: 'ui-monospace, monospace',
-          lineHeight: 1.6,
-        }}
-      >
-        <div>X: Forward months &nbsp;·&nbsp; Y: Normalized price (0–100) &nbsp;·&nbsp; Z: Product offset</div>
-        <div style={{ color: '#374151', marginTop: 2 }}>Drag to rotate &nbsp;·&nbsp; Scroll to zoom &nbsp;·&nbsp; Shift+drag to pan</div>
-      </div>
     </div>
   )
 }
