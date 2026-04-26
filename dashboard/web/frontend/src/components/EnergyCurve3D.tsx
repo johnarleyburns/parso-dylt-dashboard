@@ -53,50 +53,49 @@ function buildPoints(
     .sort((a, b) => a[0] - b[0])
 }
 
-// ---- ProductSurface — tube-mesh ref-update pattern (never remounts) ----
-// WebGL ignores linewidth > 1 on most GPUs; TubeGeometry is a real surface
-// with controllable radius and shading.
+// ---- ProductCurve — ref-update pattern (never remounts) ----
 interface ProductCurveProps {
   points: [number, number, number][]
   color: string
 }
 
-const TUBE_RADIUS = 0.25
-const TUBE_RADIAL_SEGMENTS = 6
-
 function ProductCurve({ points, color }: ProductCurveProps) {
-  const meshRef = useRef<THREE.Mesh>(null)
+  const lineRef = useRef<THREE.Line>(null)
 
-  // Allocate the mesh ONCE with a placeholder geometry and stable material.
-  const meshObject = useMemo(() => {
-    const mat = new THREE.MeshStandardMaterial({
-      color,
-      roughness: 0.35,
-      metalness: 0.15,
-      side: THREE.DoubleSide,
-    })
-    return new THREE.Mesh(new THREE.BufferGeometry(), mat)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [color])
-
-  // Replace the geometry imperatively when points change — mesh never remounts.
-  useEffect(() => {
-    const mesh = meshRef.current
-    if (!mesh || points.length < 2) return
-
-    mesh.geometry.dispose()
-    const v3 = points.map(([x, y, z]) => new THREE.Vector3(x, y, z))
-    const curve = new THREE.CatmullRomCurve3(v3)
-    mesh.geometry = new THREE.TubeGeometry(
-      curve,
-      Math.max(points.length * 3, 12),
-      TUBE_RADIUS,
-      TUBE_RADIAL_SEGMENTS,
-      false,
+  // Allocate line geometry ONCE.
+  const lineObject = useMemo(() => {
+    const geo = new THREE.BufferGeometry()
+    // Pre-allocate for up to 60 months; actual draw range set in effect.
+    geo.setAttribute(
+      'position',
+      new THREE.BufferAttribute(new Float32Array(60 * 3), 3),
     )
+    const mat = new THREE.LineBasicMaterial({ color, linewidth: 2 })
+    return new THREE.Line(geo, mat)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [color]) // color changes (sector toggle) get a new material — that's intentional
+
+  // Update geometry imperatively when price data changes.
+  // This is the key pattern: no React re-render of the scene graph.
+  useEffect(() => {
+    const line = lineRef.current
+    if (!line || points.length === 0) return
+
+    const flat = new Float32Array(points.length * 3)
+    points.forEach(([x, y, z], i) => {
+      flat[i * 3]     = x
+      flat[i * 3 + 1] = y
+      flat[i * 3 + 2] = z
+    })
+
+    const attr = line.geometry.getAttribute('position') as THREE.BufferAttribute
+    attr.set(flat)
+    attr.needsUpdate = true
+    line.geometry.setDrawRange(0, points.length)
+    line.geometry.computeBoundingSphere()
   }, [points])
 
-  return <primitive ref={meshRef} object={meshObject} />
+  return <primitive ref={lineRef} object={lineObject} />
 }
 
 // ---- main component ----
@@ -166,52 +165,49 @@ export default function EnergyCurve3D({ prices, visibleSectors }: EnergyCurve3DP
   }, [prices, visibleSectors, baseMonth])
 
   return (
-    // Outer div fills the panel; inner div constrains the canvas to ~half height.
-    <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', alignItems: 'flex-start' }}>
-      <div style={{ position: 'relative', width: '100%', height: '42vh' }}>
-        {/* The Canvas mounts once. Price data changes update geometry via refs — no remount. */}
-        <Canvas
-          camera={{ position: [30, 55, 90], fov: 75 }}
-          style={{ background: '#0a0e1a', width: '100%', height: '100%' }}
-        >
-          <ambientLight intensity={0.5} />
-          <directionalLight position={[20, 60, 40]} intensity={0.8} />
-          <directionalLight position={[-20, 30, -20]} intensity={0.3} />
+    // Wrapper div so we can render the static legend below the Canvas without
+    // using drei Html (which leaks portal divs into the DOM on view switches).
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      {/* The Canvas mounts once. Price data changes update geometry via refs — no remount. */}
+      <Canvas
+        camera={{ position: [24, 120, 60], fov: 50 }}
+        style={{ background: '#0a0e1a' }}
+      >
+        <ambientLight intensity={0.6} />
 
-          {/* One surface tube per product symbol */}
-          {curves.map(({ key, points, color }) => (
-            <ProductCurve key={key} points={points} color={color} />
-          ))}
+        {/* One curve per product symbol */}
+        {curves.map(({ key, points, color }) => (
+          <ProductCurve key={key} points={points} color={color} />
+        ))}
 
-          {/* Grid helpers for orientation */}
-          <gridHelper args={[80, 32, '#1e293b', '#1e293b']} position={[14, 0, 20]} />
+        {/* Grid helpers for orientation */}
+        <gridHelper args={[60, 24, '#1e293b', '#1e293b']} position={[12, 0, 20]} />
 
-          <OrbitControls
-            enablePan
-            enableZoom
-            enableRotate
-            target={[14, 45, 10]}
-            minDistance={10}
-            maxDistance={400}
-          />
-        </Canvas>
+        <OrbitControls
+          enablePan
+          enableZoom
+          enableRotate
+          target={[12, 50, 10]}
+          minDistance={10}
+          maxDistance={300}
+        />
+      </Canvas>
 
-        {/* Static legend — plain DOM, no drei Html, no portal leaks */}
-        <div
-          style={{
-            position: 'absolute',
-            bottom: 8,
-            left: 10,
-            fontSize: '0.6rem',
-            color: '#475569',
-            pointerEvents: 'none',
-            fontFamily: 'ui-monospace, monospace',
-            lineHeight: 1.6,
-          }}
-        >
-          <div>X: Forward months &nbsp;·&nbsp; Y: Normalized price (0–100) &nbsp;·&nbsp; Z: Product offset</div>
-          <div style={{ color: '#374151', marginTop: 2 }}>Drag to rotate &nbsp;·&nbsp; Scroll to zoom &nbsp;·&nbsp; Shift+drag to pan</div>
-        </div>
+      {/* Static legend — plain DOM, no drei Html, no portal leaks */}
+      <div
+        style={{
+          position: 'absolute',
+          bottom: 8,
+          left: 10,
+          fontSize: '0.6rem',
+          color: '#475569',
+          pointerEvents: 'none',
+          fontFamily: 'ui-monospace, monospace',
+          lineHeight: 1.6,
+        }}
+      >
+        <div>X: Forward months &nbsp;·&nbsp; Y: Normalized price (0–100) &nbsp;·&nbsp; Z: Product offset</div>
+        <div style={{ color: '#374151', marginTop: 2 }}>Drag to rotate &nbsp;·&nbsp; Scroll to zoom &nbsp;·&nbsp; Shift+drag to pan</div>
       </div>
     </div>
   )
