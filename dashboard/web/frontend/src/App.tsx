@@ -348,9 +348,10 @@ export default function App() {
           overflow: 'hidden',
           minHeight: 0,
         }}>
-          {viewMode === '3d' && (
+          {/* Always mounted — prevents Html portal orphan divs on Canvas unmount */}
+          <div style={{ position: 'absolute', inset: 0, display: viewMode === '3d' ? 'block' : 'none' }}>
             <EnergyCurve3D prices={prices} visibleSectors={visibleSectors} />
-          )}
+          </div>
           {viewMode === '2d' && (
             <PriceChart2D prices={prices} visibleSectors={visibleSectors} />
           )}
