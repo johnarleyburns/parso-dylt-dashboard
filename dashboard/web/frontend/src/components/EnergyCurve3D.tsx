@@ -18,7 +18,7 @@
 
 import { useRef, useEffect, useMemo } from 'react'
 import { Canvas } from '@react-three/fiber'
-import { OrbitControls } from '@react-three/drei'
+import { OrbitControls, Text } from '@react-three/drei'
 import * as THREE from 'three'
 import type { AllPrices, PricePoint } from '../types'
 
@@ -186,9 +186,26 @@ export default function EnergyCurve3D({ prices, visibleSectors }: EnergyCurve3DP
         camera={{ position: [30, 70, 200], fov: 65 }}
         style={{ background: '#0a0e1a' }}
       >
-        {curves.map(({ key, points, color }) => (
-          <ProductCurve key={key} points={points} color={color} />
-        ))}
+        {curves.map(({ key, points, color, label }) => {
+          const last = points[points.length - 1]
+          return (
+            <group key={key}>
+              <ProductCurve points={points} color={color} />
+              {last && (
+                <Text
+                  position={[last[0] + 3, last[1], last[2]]}
+                  fontSize={1.8}
+                  color={color}
+                  anchorX="left"
+                  anchorY="middle"
+                  renderOrder={1}
+                >
+                  {label}
+                </Text>
+              )}
+            </group>
+          )
+        })}
 
         <gridHelper args={[200, 40, '#1e293b', '#1e293b']} position={[30, 0, 35]} />
 
