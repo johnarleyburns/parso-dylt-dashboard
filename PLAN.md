@@ -66,7 +66,7 @@ The four Daylight Noble Truths applied throughout:
 Chosen for: geographic diversity (no two nodes in the same region), no shared parent company, sub-$8/month entry VPS, API-driven provisioning, clean Ubuntu 24.04 LTS support.
 
 | # | Role | Provider | Plan | Est. Cost/mo | Region | Provisioning API |
-|---|------|----------|------|-------------|--------|-----------------|
+|---|------|----------|------|--------------|--------|------------------|
 | **N1** | Runtime Node 1 | **Hetzner Cloud** | CX22 (2 vCPU, 4 GB RAM, 40 GB NVMe) | ~$4.15 | Ashburn, VA (**US East**) | Hetzner Cloud API |
 | **N2** | Runtime Node 2 | **Linode (Akamai)** | Cloud Server (1 vCPU, 2 GB RAM, 20 GB SSD) | ~$6.00 | Los Angeles, CA (**US West**) | Linode REST API |
 | **N3** | Runtime Node 3 | **Scaleway** | PLAY2-MICRO (1 vCPU, 2 GB RAM, 20 GB SSD) | ~$4.00 | Paris, FR (**Europe**) | Scaleway API v1 |
@@ -78,11 +78,11 @@ Chosen for: geographic diversity (no two nodes in the same region), no shared pa
 ### Geographic Distribution
 
 | Node | Region | Failure zone |
-|------|--------|-------------|
-| N1/Hetzner | US East (Ashburn, VA) | US East outage → N2 + N3 hold quorum |
-| N2/Linode | US West (Los Angeles, CA) | US West outage → N1 + N3 hold quorum |
-| N3/Scaleway | Europe (Paris, FR) | Europe outage → N1 + N2 hold quorum |
-| N4/UpCloud | US Central (Chicago, IL) | Control node down → runtime unaffected |
+|------|--------|--------------|
+| N1/Hetzner  | US East (Ashburn, VA)     | US East outage → N2 + N3 hold quorum |
+| N2/Linode   | US West (Los Angeles, CA) | US West outage → N1 + N3 hold quorum |
+| N3/Scaleway | Europe (Paris, FR)        | Europe outage → N1 + N2 hold quorum |
+| N4/UpCloud  | US Central (Chicago, IL)  | Control node down → runtime unaffected |
 
 No two nodes share a failure zone. A US East + Europe simultaneous outage leaves N2 (US West) serving in degraded read-only mode. No provider parent company is shared across any two nodes.
 
@@ -204,10 +204,10 @@ oilfield/
                         DNS: oilfield.parso.guru
                         A → N1, N2, N3 (round-robin, 60s TTL)
                                │
-           ┌───────────────────┼───────────────────┐
-           ▼                   ▼                   ▼
+           ┌───────────────────┼─────────────────┐
+           ▼                   ▼                 ▼
     ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-    │  N1/Hetzner │    │ N2/Linode │    │  N3/Scaleway│
+    │  N1/Hetzner │    │ N2/Linode   │    │  N3/Scaleway│
     │  US East    │    │  US West    │    │  Paris, EU  │
     │─────────────│    │─────────────│    │─────────────│
     │ etcd peer   │◄──►│ etcd peer   │◄──►│ etcd peer   │
