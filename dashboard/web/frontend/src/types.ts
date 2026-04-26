@@ -23,8 +23,7 @@ export interface NewsItem {
 }
 
 export interface NewsResponse {
-  eia: NewsItem[]
-  iea: NewsItem[]
+  items: NewsItem[]
 }
 
 export interface NodeHealth {

@@ -116,38 +116,44 @@ func main() {
 	// Investing.com HTML scraper — best-effort for TTF spot (cross-check against YF futures).
 	runSingle("natgas/ttf", func() (scraper.PricePoint, error) { return inv.ScrapeTTF(ctx) })
 
-	// News RSS (gofeed — reliable, rate-limit friendly)
-	wg.Add(2)
+	// News RSS — table-driven, one goroutine per source (gofeed, rate-limit friendly)
+	newsSources := []struct {
+		slug  string
+		url   string
+		label string
+	}{
+		{"eia",            "https://www.eia.gov/rss/todayinenergy.xml",                                                                                           "EIA"},
+		{"oilprice",       "https://oilprice.com/rss/main",                                                                                                       "OilPrice"},
+		{"doe",            "https://www.energy.gov/rss.xml",                                                                                                      "US DOE"},
+		{"eu_energy",      "https://energy.ec.europa.eu/node/2/rss_en",                                                                                           "EU Energy"},
+		{"uk_desnz",       "https://www.gov.uk/government/organisations/department-for-energy-security-and-net-zero.atom",                                        "UK DESNZ"},
+		{"canada_nrc",     "https://natural-resources.canada.ca/rss.xml",                                                                                         "Canada NRC"},
+		{"rigzone",        "https://www.rigzone.com/news/rss/rigzone_latest.aspx",                                                                                "Rigzone"},
+		{"carbon_brief",   "https://www.carbonbrief.org/feed/",                                                                                                   "Carbon Brief"},
+		{"ieefa",          "https://ieefa.org/feed/",                                                                                                             "IEEFA"},
+		{"energy_monitor", "https://www.energymonitor.ai/feed/",                                                                                                  "Energy Monitor"},
+	}
+
 	newsResults := make(map[string][]scraper.NewsItem)
 	var newsMu sync.Mutex
-	go func() {
-		defer wg.Done()
-		items, err := scraper.ScrapeNewsRSS(ctx, "https://www.eia.gov/rss/todayinenergy.xml", "EIA")
-		if err != nil {
-			log.Printf("[%s] EIA RSS error: %v", nodeName, err)
-			return
-		}
-		var existing []scraper.NewsItem
-		store.GetJSON(ctx, "/oilfield/news/eia/items", &existing)
-		merged := scraper.MergeNews(items, existing)
-		newsMu.Lock()
-		newsResults["eia"] = merged
-		newsMu.Unlock()
-	}()
-	go func() {
-		defer wg.Done()
-		items, err := scraper.ScrapeNewsRSS(ctx, "https://oilprice.com/rss/main", "OilPrice")
-		if err != nil {
-			log.Printf("[%s] OilPrice RSS error: %v", nodeName, err)
-			return
-		}
-		var existing []scraper.NewsItem
-		store.GetJSON(ctx, "/oilfield/news/iea/items", &existing)
-		merged := scraper.MergeNews(items, existing)
-		newsMu.Lock()
-		newsResults["iea"] = merged
-		newsMu.Unlock()
-	}()
+	for _, src := range newsSources {
+		src := src
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			items, err := scraper.ScrapeNewsRSS(ctx, src.url, src.label)
+			if err != nil {
+				log.Printf("[%s] RSS error (%s): %v", nodeName, src.slug, err)
+				return
+			}
+			var existing []scraper.NewsItem
+			store.GetJSON(ctx, "/oilfield/news/"+src.slug+"/items", &existing)
+			merged := scraper.MergeNews(items, existing)
+			newsMu.Lock()
+			newsResults[src.slug] = merged
+			newsMu.Unlock()
+		}()
+	}
 
 	// Wait for all goroutines, then close results channel
 	go func() {

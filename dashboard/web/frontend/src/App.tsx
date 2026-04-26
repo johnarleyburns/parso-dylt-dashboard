@@ -82,7 +82,7 @@ async function apiFetch<T>(path: string): Promise<T> {
 
 export default function App() {
   const [prices, setPrices]   = useState<AllPrices>({})
-  const [news, setNews]       = useState<NewsResponse>({ eia: [], iea: [] })
+  const [news, setNews]       = useState<NewsResponse>({ items: [] })
   const [health, setHealth]   = useState<AllHealth>({})
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
   const [error, setError]     = useState<string | null>(null)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -168,20 +169,26 @@ func (s *Server) news(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	var eia, iea []scraper.NewsItem
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { defer wg.Done(); s.store.GetJSON(ctx, "/oilfield/news/eia/items", &eia) }()
-	go func() { defer wg.Done(); s.store.GetJSON(ctx, "/oilfield/news/iea/items", &iea) }()
-	wg.Wait()
-
-	if eia == nil {
-		eia = []scraper.NewsItem{}
+	// Scan all /oilfield/news/*/items keys so new sources need no handler changes.
+	raw, _ := s.store.GetWithPrefix(ctx, "/oilfield/news/")
+	var all []scraper.NewsItem
+	for _, v := range raw {
+		var items []scraper.NewsItem
+		if err := json.Unmarshal([]byte(v), &items); err == nil {
+			all = append(all, items...)
+		}
 	}
-	if iea == nil {
-		iea = []scraper.NewsItem{}
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].PublishedAt.After(all[j].PublishedAt)
+	})
+	const maxItems = 300
+	if len(all) > maxItems {
+		all = all[:maxItems]
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"eia": eia, "iea": iea})
+	if all == nil {
+		all = []scraper.NewsItem{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": all})
 }
 
 type nodeStatus struct {
