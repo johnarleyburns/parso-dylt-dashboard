@@ -38,7 +38,8 @@ const SECTOR_COLORS: Record<string, string> = {
 // Z = product offset (separates ribbons in depth)
 const X_SCALE = 4
 const MAX_PTS = 60
-const RIBBON_W = 1.2  // visible width of each ribbon in scene units
+const RIBBON_W = 4.0  // visible width of each ribbon in scene units
+const Z_SPACING = 5   // distance between ribbon centres along Z
 
 function buildPoints(
   pts: PricePoint[],
@@ -51,7 +52,7 @@ function buildPoints(
       const monthsDiff =
         (d.getFullYear() - baseMonth.getFullYear()) * 12 +
         (d.getMonth() - baseMonth.getMonth())
-      return [monthsDiff * X_SCALE, p.price, zIndex * 2] as [number, number, number]
+      return [monthsDiff * X_SCALE, p.price, zIndex * Z_SPACING] as [number, number, number]
     })
     .sort((a, b) => a[0] - b[0])
 }
@@ -182,22 +183,22 @@ export default function EnergyCurve3D({ prices, visibleSectors }: EnergyCurve3DP
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <Canvas
-        camera={{ position: [30, 60, 120], fov: 60 }}
+        camera={{ position: [30, 70, 200], fov: 65 }}
         style={{ background: '#0a0e1a' }}
       >
         {curves.map(({ key, points, color }) => (
           <ProductCurve key={key} points={points} color={color} />
         ))}
 
-        <gridHelper args={[120, 30, '#1e293b', '#1e293b']} position={[30, 0, 14]} />
+        <gridHelper args={[200, 40, '#1e293b', '#1e293b']} position={[30, 0, 35]} />
 
         <OrbitControls
           enablePan
           enableZoom
           enableRotate
-          target={[24, 35, 14]}
+          target={[24, 35, 35]}
           minDistance={10}
-          maxDistance={400}
+          maxDistance={600}
         />
       </Canvas>
     </div>
