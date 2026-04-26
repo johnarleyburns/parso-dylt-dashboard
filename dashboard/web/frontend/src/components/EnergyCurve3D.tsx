@@ -11,7 +11,7 @@
 
 import { useRef, useEffect, useMemo } from 'react'
 import { Canvas } from '@react-three/fiber'
-import { OrbitControls, Text } from '@react-three/drei'
+import { OrbitControls, Html } from '@react-three/drei'
 import * as THREE from 'three'
 import type { AllPrices, PricePoint } from '../types'
 
@@ -98,25 +98,29 @@ function ProductCurve({ points, color }: ProductCurveProps) {
 }
 
 // ---- Axis labels ----
+// Uses Html (DOM overlay) instead of drei Text to avoid troika font-loading failures.
 function AxisLabel({
   position,
   text,
-  fontSize = 0.4,
 }: {
   position: [number, number, number]
   text: string
-  fontSize?: number
 }) {
   return (
-    <Text
-      position={position}
-      fontSize={fontSize}
-      color="#94a3b8"
-      anchorX="center"
-      anchorY="middle"
-    >
-      {text}
-    </Text>
+    <Html position={position} center style={{ pointerEvents: 'none' }}>
+      <span
+        style={{
+          color: '#94a3b8',
+          fontSize: '10px',
+          fontFamily: 'ui-monospace, monospace',
+          whiteSpace: 'nowrap',
+          userSelect: 'none',
+          textShadow: '0 0 4px #0a0e1a',
+        }}
+      >
+        {text}
+      </span>
+    </Html>
   )
 }
 
@@ -207,7 +211,7 @@ export default function EnergyCurve3D({ prices, visibleSectors }: EnergyCurve3DP
 
       {/* X-axis month labels */}
       {monthLabels.map(({ x, text }) => (
-        <AxisLabel key={x} position={[x, -8, -2]} text={text} fontSize={0.5} />
+        <AxisLabel key={x} position={[x, -8, -2]} text={text} />
       ))}
 
       {/* Y-axis label */}

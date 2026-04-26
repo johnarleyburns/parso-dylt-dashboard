@@ -65,6 +65,18 @@ type eiaResp struct {
 	} `json:"response"`
 }
 
+// eiaRetailResp parses the electricity/retail-sales endpoint.
+// The price field name differs from the generic eiaResp.
+type eiaRetailResp struct {
+	Response struct {
+		Data []struct {
+			Period  string      `json:"period"`
+			StateID string      `json:"stateid"`
+			Price   interface{} `json:"price"` // cents per kilowatt-hour, returned as string
+		} `json:"data"`
+	} `json:"response"`
+}
+
 // parseEIAValue converts the mixed-type value field (string or float64) to float64.
 func parseEIAValue(v interface{}) (float64, error) {
 	switch x := v.(type) {
@@ -236,76 +248,77 @@ func (e *EIAClient) ScrapeLPG(ctx context.Context) []PricePoint {
 // EIA no longer publishes daily Mont Belvieu NGL spot prices via API v2; returns empty.
 func (e *EIAClient) ScrapeNGLs(_ context.Context) []PricePoint { return nil }
 
-// ScrapeElectricity returns EIA RTO day-ahead price history (90 days, oldest-first).
-// Fetches all RTOs concurrently. Uses electricity/rto/daily-region-data.
+// ScrapeElectricity returns 24 months of monthly average retail electricity prices
+// for five representative states (CA/TX/PA/IL/NY), converted from cents/kWh to USD/MWh.
+// Source: EIA electricity/retail-sales — the only EIA v2 route that returns $/MWh-equivalent prices.
+// (EIA v2 electricity/rto routes return MWh demand quantities, not prices.)
 func (e *EIAClient) ScrapeElectricity(ctx context.Context) []PricePoint {
-	type rtoSpec struct {
-		respondent string
-		symbol     string
-		name       string
-		geography  string
+	type stateSpec struct {
+		id        string
+		symbol    string
+		name      string
+		geography string
 	}
-	rtos := []rtoSpec{
-		{"PJM", "PJMW", "PJM Day-Ahead (West Hub)", "US_MID_ATL"},
-		{"CAISO", "CASP", "CAISO SP-15", "US_WEST"},
-		{"ERCO", "ERCH", "ERCOT Houston Hub", "US_TEXAS"},
-		{"MISO", "MISO", "MISO Illinois Hub", "US_MIDWEST"},
-		{"NYISO", "NYZA", "NYISO Zone A", "US_NORTHEAST"},
+	states := []stateSpec{
+		{"CA", "CASP", "California Retail Electricity", "US_WEST"},
+		{"TX", "ERCO", "Texas Retail Electricity", "US_TEXAS"},
+		{"PA", "PJMP", "Pennsylvania Retail Electricity", "US_MID_ATL"},
+		{"IL", "MISO", "Illinois Retail Electricity", "US_MIDWEST"},
+		{"NY", "NYIS", "New York Retail Electricity", "US_NORTHEAST"},
 	}
 
-	const historyDays = 90
+	// One request fetches all 5 states: 24 months × 5 states = 120 rows max.
+	url := fmt.Sprintf(
+		"https://api.eia.gov/v2/electricity/retail-sales/data/?api_key=%s"+
+			"&frequency=monthly&data[0]=price"+
+			"&facets[stateid][]=CA&facets[stateid][]=TX&facets[stateid][]=PA&facets[stateid][]=IL&facets[stateid][]=NY"+
+			"&facets[sectorid][]=ALL"+
+			"&sort[0][column]=period&sort[0][direction]=desc&length=120",
+		e.apiKey,
+	)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil
+	}
+	resp, err := e.http.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+
+	var r eiaRetailResp
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		return nil
+	}
+
+	stateMap := make(map[string]stateSpec, len(states))
+	for _, s := range states {
+		stateMap[s.id] = s
+	}
+
 	now := time.Now().UTC()
-	ch := make(chan []PricePoint, len(rtos))
-
-	for _, rto := range rtos {
-		rto := rto
-		go func() {
-			url := fmt.Sprintf(
-				"https://api.eia.gov/v2/electricity/rto/daily-region-data/data/?api_key=%s&frequency=daily&data[0]=value&facets[respondent][]=%s&facets[type][]=DF&sort[0][column]=period&sort[0][direction]=desc&length=%d",
-				e.apiKey, rto.respondent, historyDays,
-			)
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-			if err != nil {
-				ch <- nil
-				return
-			}
-			resp, err := e.http.Do(req)
-			if err != nil {
-				ch <- nil
-				return
-			}
-			var r eiaResp
-			if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
-				resp.Body.Close()
-				ch <- nil
-				return
-			}
-			resp.Body.Close()
-
-			// Reverse so points are oldest-first (natural time order for charting).
-			data := r.Response.Data
-			pts := make([]PricePoint, 0, len(data))
-			for i := len(data) - 1; i >= 0; i-- {
-				d := data[i]
-				v, err := parseEIAValue(d.Value)
-				if err != nil || v <= 0 {
-					continue
-				}
-				pts = append(pts, PricePoint{
-					Symbol: rto.symbol, Name: rto.name, Sector: "electricity",
-					Exchange: "RTO", Geography: rto.geography, DeliveryMonth: d.Period,
-					Price: v, Unit: "USD/MWh", ScrapedAt: now, Source: "eia_api",
-				})
-			}
-			ch <- pts
-		}()
+	data := r.Response.Data
+	pts := make([]PricePoint, 0, len(data))
+	// Reverse so points are oldest-first (natural time order for charting).
+	for i := len(data) - 1; i >= 0; i-- {
+		d := data[i]
+		sp, ok := stateMap[d.StateID]
+		if !ok {
+			continue
+		}
+		v, err := parseEIAValue(d.Price)
+		if err != nil || v <= 0 {
+			continue
+		}
+		pts = append(pts, PricePoint{
+			Symbol: sp.symbol, Name: sp.name, Sector: "electricity",
+			Exchange: "EIA", Geography: sp.geography, DeliveryMonth: d.Period + "-01",
+			Price: v * 10, // cents/kWh → USD/MWh
+			Unit: "USD/MWh", ScrapedAt: now, Source: "eia_api",
+		})
 	}
-
-	var all []PricePoint
-	for range rtos {
-		all = append(all, <-ch...)
-	}
-	return all
+	return pts
 }
 
 // ScrapeRefined returns EIA-sourced refined product price points.

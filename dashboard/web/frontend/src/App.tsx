@@ -51,6 +51,20 @@ function useMobile(): boolean {
   return mobile
 }
 
+// useLandscape tracks whether the viewport is wider than it is tall.
+// Used to switch portrait-mobile column layout to row layout in landscape.
+function useLandscape(): boolean {
+  const [landscape, setLandscape] = useState(() =>
+    typeof window !== 'undefined' && window.innerWidth > window.innerHeight,
+  )
+  useEffect(() => {
+    const update = () => setLandscape(window.innerWidth > window.innerHeight)
+    window.addEventListener('resize', update)
+    return () => window.removeEventListener('resize', update)
+  }, [])
+  return landscape
+}
+
 async function apiFetch<T>(path: string): Promise<T> {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), 10_000)
@@ -77,6 +91,10 @@ export default function App() {
   const [showConsole, setShowConsole] = useState(false)
 
   const mobile = useMobile()
+  const landscape = useLandscape()
+  // Use side-by-side (row) layout for desktop or any landscape orientation.
+  // Only use stacked (column) layout in portrait mobile.
+  const rowLayout = !mobile || landscape
 
   const fetchPrices = useCallback(async () => {
     try {
@@ -319,13 +337,13 @@ export default function App() {
       <div style={{
         flex: 1,
         display: 'flex',
-        flexDirection: mobile ? 'column' : 'row',
+        flexDirection: rowLayout ? 'row' : 'column',
         overflow: 'hidden',
         minHeight: 0,
       }}>
         {/* Primary chart/table panel */}
         <div style={{
-          flex: mobile ? '1 1 0' : '0 0 72%',
+          flex: rowLayout ? '0 0 72%' : '1 1 0',
           position: 'relative',
           overflow: 'hidden',
           minHeight: 0,
@@ -341,12 +359,12 @@ export default function App() {
           )}
         </div>
 
-        {/* News panel — right side on desktop, bottom panel on mobile */}
+        {/* News panel — right side on desktop/landscape, bottom strip on portrait mobile */}
         <div
           style={{
-            flex: mobile ? '0 0 240px' : '0 0 28%',
-            borderLeft: mobile ? 'none' : '1px solid #1e293b',
-            borderTop: mobile ? '1px solid #1e293b' : 'none',
+            flex: rowLayout ? '0 0 28%' : '0 0 240px',
+            borderLeft: rowLayout ? '1px solid #1e293b' : 'none',
+            borderTop: rowLayout ? 'none' : '1px solid #1e293b',
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
