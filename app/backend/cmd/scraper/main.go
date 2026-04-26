@@ -60,9 +60,11 @@ func main() {
 	store.Put(ctx, "/oilfield/config/active_node", nodeName)
 	store.Put(ctx, "/oilfield/nodes/"+nodeName+"/status", "ok")
 
-	eia := scraper.NewEIAClient(eiaKey)
-	yf  := scraper.NewYahooFinanceScraper()
-	inv := scraper.NewInvestingScraper()
+	eia      := scraper.NewEIAClient(eiaKey)
+	yf       := scraper.NewYahooFinanceScraper()
+	inv      := scraper.NewInvestingScraper()
+	fred     := scraper.NewFREDClient()
+	oilprice := scraper.NewOilPriceAPIClient(envOr("OILPRICE_API_KEY", ""))
 
 	type sectorResult struct {
 		sector string
@@ -115,6 +117,28 @@ func main() {
 
 	// Investing.com HTML scraper — best-effort for TTF spot (cross-check against YF futures).
 	runSingle("natgas/ttf", func() (scraper.PricePoint, error) { return inv.ScrapeTTF(ctx) })
+
+	// FRED (Federal Reserve) — free CSV, no API key, monthly IMF commodity series.
+	// Fills Middle East crude, coal, and Asia LNG gaps not covered by EIA.
+	runSingle("crude/dubai_fred",  func() (scraper.PricePoint, error) { return fred.ScrapeDubaiCrude(ctx) })
+	runSingle("coal/newc_fred",    func() (scraper.PricePoint, error) { return fred.ScrapeNewcastleCoal(ctx) })
+	runSingle("coal/colombia",     func() (scraper.PricePoint, error) { return fred.ScrapeColombiaCoal(ctx) })
+	runSingle("natgas/eu_fred",    func() (scraper.PricePoint, error) { return fred.ScrapeNatGasEurope(ctx) })
+	runSingle("lng/japan_fred",    func() (scraper.PricePoint, error) { return fred.ScrapeNatGasJapan(ctx) })
+
+	// OilPriceAPI — real-time global benchmarks (requires OILPRICE_API_KEY env var).
+	// Sign up at https://oilpriceapi.com for a free trial key.
+	// Skips gracefully (logs warning) if key is not set.
+	if oilprice.IsEnabled() {
+		runSingle("crude/dubai_op",   func() (scraper.PricePoint, error) { return oilprice.ScrapeDubaiCrude(ctx) })
+		runSingle("crude/urals",      func() (scraper.PricePoint, error) { return oilprice.ScrapeUrals(ctx) })
+		runSingle("refined/sg_vlsfo", func() (scraper.PricePoint, error) { return oilprice.ScrapeSingaporeVLSFO(ctx) })
+		runSingle("lng/jkm",          func() (scraper.PricePoint, error) { return oilprice.ScrapeJKM(ctx) })
+		runSingle("coal/newc_op",     func() (scraper.PricePoint, error) { return oilprice.ScrapeNewcastleCoal(ctx) })
+		runSingle("carbon/eua",       func() (scraper.PricePoint, error) { return oilprice.ScrapeEUCarbon(ctx) })
+	} else {
+		log.Printf("[%s] OilPriceAPI disabled — set OILPRICE_API_KEY to enable Dubai, Urals, JKM, Singapore, coal, carbon", nodeName)
+	}
 
 	// News RSS — table-driven, one goroutine per source (gofeed, rate-limit friendly)
 	newsSources := []struct {

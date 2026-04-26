@@ -1,5 +1,18 @@
 import { useState, useEffect, useCallback } from 'react'
 import { RefreshCw, AlertTriangle, Box, LineChart, TableIcon, Shield } from 'lucide-react'
+
+function ParsoLogo({ size = 32 }: { size?: number }) {
+  const h = size
+  const w = size * 3.2
+  return (
+    <svg width={w} height={h} viewBox="0 0 96 30" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Parso Consulting">
+      <rect x="0" y="6" width="4" height="18" rx="2" fill="#00d4ff"/>
+      <rect x="6" y="0" width="4" height="30" rx="2" fill="#00d4ff" opacity="0.7"/>
+      <rect x="12" y="10" width="4" height="14" rx="2" fill="#00d4ff" opacity="0.4"/>
+      <text x="22" y="21" fontFamily="ui-monospace,monospace" fontWeight="700" fontSize="13" letterSpacing="2" fill="#e2e8f0">PARSO</text>
+    </svg>
+  )
+}
 import EnergyCurve3D from './components/EnergyCurve3D'
 import PriceChart2D from './components/PriceChart2D'
 import PriceTable from './components/PriceTable'
@@ -16,7 +29,7 @@ const PRICE_INTERVAL_MS  = 30_000
 const NEWS_INTERVAL_MS   = 300_000
 const HEALTH_INTERVAL_MS = 15_000
 
-const ALL_SECTORS = ['crude', 'natgas', 'lng', 'lpg', 'ngls', 'electricity', 'refined']
+const ALL_SECTORS = ['crude', 'natgas', 'lng', 'lpg', 'ngls', 'electricity', 'refined', 'coal', 'carbon']
 
 const SECTOR_LABELS: Record<string, string> = {
   crude:       'Crude',
@@ -26,6 +39,8 @@ const SECTOR_LABELS: Record<string, string> = {
   ngls:        'NGLs',
   electricity: 'Electricity',
   refined:     'Refined',
+  coal:        'Coal',
+  carbon:      'Carbon',
 }
 
 const SECTOR_COLORS: Record<string, string> = {
@@ -36,6 +51,8 @@ const SECTOR_COLORS: Record<string, string> = {
   ngls:        '#84cc16',
   electricity: '#a855f7',
   refined:     '#ef4444',
+  coal:        '#78716c',
+  carbon:      '#14b8a6',
 }
 
 function useMobile(): boolean {
@@ -204,6 +221,9 @@ export default function App() {
             gap: '0.5rem',
             borderBottom: '1px solid #0f172a',
           }}>
+            <a href="https://parsoconsulting.com" target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+              <ParsoLogo size={22} />
+            </a>
             <h1 style={{ color: '#e2e8f0', fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.06em', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               OILFIELD DASHBOARD
             </h1>
@@ -258,6 +278,9 @@ export default function App() {
             flexShrink: 0,
           }}
         >
+          <a href="https://parsoconsulting.com" target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+            <ParsoLogo size={28} />
+          </a>
           <h1 style={{ color: '#e2e8f0', fontSize: '0.875rem', fontWeight: 700, letterSpacing: '0.1em', whiteSpace: 'nowrap' }}>
             OILFIELD — ENERGY MARKET DASHBOARD
           </h1>
