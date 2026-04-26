@@ -13,7 +13,7 @@
  *   Html portals to gl.domElement.parentNode and in some drei versions the
  *   portal divs escape CSS containment (display:none on the parent is ignored),
  *   leaving phantom floating labels visible on other views. Use plain DOM
- *   elements rendered outside the Canvas instead (see the legend div below).
+ *   elements rendered outside the Canvas instead.
  */
 
 import { useRef, useEffect, useMemo } from 'react'
@@ -24,19 +24,22 @@ import type { AllPrices, PricePoint } from '../types'
 
 // ---- colour palette (one per sector) ----
 const SECTOR_COLORS: Record<string, string> = {
-  crude:       '#3b82f6', // blue
-  natgas:      '#f97316', // orange
-  lng:         '#f59e0b', // amber
-  lpg:         '#22c55e', // green
-  ngls:        '#84cc16', // lime
-  electricity: '#a855f7', // purple
-  refined:     '#ef4444', // red
+  crude:       '#3b82f6',
+  natgas:      '#f97316',
+  lng:         '#f59e0b',
+  lpg:         '#22c55e',
+  ngls:        '#84cc16',
+  electricity: '#a855f7',
+  refined:     '#ef4444',
 }
 
-// Build a list of 3-D points for one product across its delivery months.
-// X = month index relative to the earliest month in the dataset (0, 1, 2 …)
-// Y = price (actual USD value — label shows unit)
-// Z = product index within its sector (separates curves visually on Z axis)
+// X = month index * X_SCALE (spread out forward months)
+// Y = normalized price (0–100)
+// Z = product offset (separates ribbons in depth)
+const X_SCALE = 4
+const MAX_PTS = 60
+const RIBBON_W = 1.2  // visible width of each ribbon in scene units
+
 function buildPoints(
   pts: PricePoint[],
   zIndex: number,
@@ -48,54 +51,73 @@ function buildPoints(
       const monthsDiff =
         (d.getFullYear() - baseMonth.getFullYear()) * 12 +
         (d.getMonth() - baseMonth.getMonth())
-      return [monthsDiff, p.price, zIndex * 2] as [number, number, number]
+      return [monthsDiff * X_SCALE, p.price, zIndex * 2] as [number, number, number]
     })
     .sort((a, b) => a[0] - b[0])
 }
 
-// ---- ProductCurve — ref-update pattern (never remounts) ----
+// ---- ProductRibbon — flat ribbon mesh, ref-update pattern (never remounts) ----
+// Each curve is a quad-strip ribbon lying in the XY plane with width RIBBON_W
+// along Z. MeshBasicMaterial means no lighting dependency — colour stays crisp.
+// Index buffer is pre-filled once; only positions and draw range are updated.
 interface ProductCurveProps {
   points: [number, number, number][]
   color: string
 }
 
 function ProductCurve({ points, color }: ProductCurveProps) {
-  const lineRef = useRef<THREE.Line>(null)
+  const meshRef = useRef<THREE.Mesh>(null)
 
-  // Allocate line geometry ONCE.
-  const lineObject = useMemo(() => {
+  const meshObject = useMemo(() => {
     const geo = new THREE.BufferGeometry()
-    // Pre-allocate for up to 60 months; actual draw range set in effect.
+
+    // 2 vertices per point (z ± RIBBON_W/2), pre-allocated for MAX_PTS
     geo.setAttribute(
       'position',
-      new THREE.BufferAttribute(new Float32Array(60 * 3), 3),
+      new THREE.BufferAttribute(new Float32Array(MAX_PTS * 2 * 3), 3),
     )
-    const mat = new THREE.LineBasicMaterial({ color, linewidth: 2 })
-    return new THREE.Line(geo, mat)
+
+    // Index buffer: 2 triangles per quad, (MAX_PTS-1) quads — filled once, never changes
+    const idx = new Uint16Array((MAX_PTS - 1) * 6)
+    for (let i = 0; i < MAX_PTS - 1; i++) {
+      const b = i * 6, v = i * 2
+      idx[b]     = v;     idx[b + 1] = v + 1; idx[b + 2] = v + 2
+      idx[b + 3] = v + 1; idx[b + 4] = v + 3; idx[b + 5] = v + 2
+    }
+    geo.setIndex(new THREE.BufferAttribute(idx, 1))
+    geo.setDrawRange(0, 0)
+
+    const mat = new THREE.MeshBasicMaterial({
+      color,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.88,
+    })
+    return new THREE.Mesh(geo, mat)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [color]) // color changes (sector toggle) get a new material — that's intentional
+  }, [color])
 
-  // Update geometry imperatively when price data changes.
-  // This is the key pattern: no React re-render of the scene graph.
   useEffect(() => {
-    const line = lineRef.current
-    if (!line || points.length === 0) return
+    const mesh = meshRef.current
+    if (!mesh || points.length < 2) return
 
-    const flat = new Float32Array(points.length * 3)
+    const pos = mesh.geometry.getAttribute('position') as THREE.BufferAttribute
+    const arr = pos.array as Float32Array
+    const half = RIBBON_W / 2
+
     points.forEach(([x, y, z], i) => {
-      flat[i * 3]     = x
-      flat[i * 3 + 1] = y
-      flat[i * 3 + 2] = z
+      const lo = (i * 2) * 3
+      const hi = (i * 2 + 1) * 3
+      arr[lo]     = x; arr[lo + 1] = y; arr[lo + 2] = z - half
+      arr[hi]     = x; arr[hi + 1] = y; arr[hi + 2] = z + half
     })
 
-    const attr = line.geometry.getAttribute('position') as THREE.BufferAttribute
-    attr.set(flat)
-    attr.needsUpdate = true
-    line.geometry.setDrawRange(0, points.length)
-    line.geometry.computeBoundingSphere()
+    pos.needsUpdate = true
+    mesh.geometry.setDrawRange(0, (points.length - 1) * 6)
+    mesh.geometry.computeBoundingSphere()
   }, [points])
 
-  return <primitive ref={lineRef} object={lineObject} />
+  return <primitive ref={meshRef} object={meshObject} />
 }
 
 // ---- main component ----
@@ -105,7 +127,6 @@ interface EnergyCurve3DProps {
 }
 
 export default function EnergyCurve3D({ prices, visibleSectors }: EnergyCurve3DProps) {
-  // Compute the earliest delivery month across all displayed data.
   const baseMonth = useMemo(() => {
     const dates: Date[] = []
     for (const [sector, pts] of Object.entries(prices)) {
@@ -117,9 +138,6 @@ export default function EnergyCurve3D({ prices, visibleSectors }: EnergyCurve3DP
     return dates.length > 0 ? new Date(Math.min(...dates.map((d) => d.getTime()))) : new Date()
   }, [prices, visibleSectors])
 
-  // Gather all curves: one per unique symbol across visible sectors.
-  // Prices are normalized per-sector (0–100 scale) so crude ($94) and gas ($2.68)
-  // are both visible on the same Y axis without one dwarfing the other.
   const curves = useMemo(() => {
     const result: Array<{
       key: string
@@ -132,13 +150,11 @@ export default function EnergyCurve3D({ prices, visibleSectors }: EnergyCurve3DP
     for (const [sector, pts] of Object.entries(prices)) {
       if (!visibleSectors.has(sector) || pts.length === 0) continue
 
-      // Compute sector-wide min/max for normalization.
       const allPrices = pts.map((p) => p.price).filter((v) => v > 0)
       const sectorMin = Math.min(...allPrices)
       const sectorMax = Math.max(...allPrices)
       const sectorRange = sectorMax - sectorMin || 1
 
-      // Group by symbol — each symbol gets its own curve.
       const bySymbol = new Map<string, PricePoint[]>()
       pts.forEach((p) => {
         const existing = bySymbol.get(p.symbol) ?? []
@@ -147,10 +163,9 @@ export default function EnergyCurve3D({ prices, visibleSectors }: EnergyCurve3DP
       })
 
       for (const [symbol, symbolPts] of bySymbol) {
-        // Normalize each price to 0–100 within this sector's range.
         const normalized = symbolPts.map((p) => ({
           ...p,
-          price: ((p.price - sectorMin) / sectorRange) * 80 + 10, // 10–90 band
+          price: ((p.price - sectorMin) / sectorRange) * 80 + 10,
         }))
         result.push({
           key: `${sector}-${symbol}`,
@@ -165,34 +180,26 @@ export default function EnergyCurve3D({ prices, visibleSectors }: EnergyCurve3DP
   }, [prices, visibleSectors, baseMonth])
 
   return (
-    // Wrapper div so we can render the static legend below the Canvas without
-    // using drei Html (which leaks portal divs into the DOM on view switches).
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-      {/* The Canvas mounts once. Price data changes update geometry via refs — no remount. */}
       <Canvas
-        camera={{ position: [24, 120, 60], fov: 50 }}
+        camera={{ position: [30, 60, 120], fov: 60 }}
         style={{ background: '#0a0e1a' }}
       >
-        <ambientLight intensity={0.6} />
-
-        {/* One curve per product symbol */}
         {curves.map(({ key, points, color }) => (
           <ProductCurve key={key} points={points} color={color} />
         ))}
 
-        {/* Grid helpers for orientation */}
-        <gridHelper args={[60, 24, '#1e293b', '#1e293b']} position={[12, 0, 20]} />
+        <gridHelper args={[120, 30, '#1e293b', '#1e293b']} position={[30, 0, 14]} />
 
         <OrbitControls
           enablePan
           enableZoom
           enableRotate
-          target={[12, 50, 10]}
+          target={[24, 35, 14]}
           minDistance={10}
-          maxDistance={300}
+          maxDistance={400}
         />
       </Canvas>
-
     </div>
   )
 }
