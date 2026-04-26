@@ -7,11 +7,18 @@
  *   setAttribute). React state changes in App.tsx do NOT remount the scene.
  *   An earlier agent version re-created the entire scene on every 30-second
  *   price poll, pegging one CPU core at 100%.
+ *
+ * IMPORTANT — Agent Failure Case #4 prevention:
+ *   Do NOT use @react-three/drei Html for any labels in this component.
+ *   Html portals to gl.domElement.parentNode and in some drei versions the
+ *   portal divs escape CSS containment (display:none on the parent is ignored),
+ *   leaving phantom floating labels visible on other views. Use plain DOM
+ *   elements rendered outside the Canvas instead (see the legend div below).
  */
 
 import { useRef, useEffect, useMemo } from 'react'
 import { Canvas } from '@react-three/fiber'
-import { OrbitControls, Html } from '@react-three/drei'
+import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import type { AllPrices, PricePoint } from '../types'
 
@@ -24,12 +31,6 @@ const SECTOR_COLORS: Record<string, string> = {
   ngls:        '#84cc16', // lime
   electricity: '#a855f7', // purple
   refined:     '#ef4444', // red
-}
-
-// Months short-label from "YYYY-MM-01"
-function monthLabel(deliveryMonth: string): string {
-  const d = new Date(deliveryMonth)
-  return isNaN(d.getTime()) ? '' : d.toLocaleString('en-US', { month: 'short', year: '2-digit' })
 }
 
 // Build a list of 3-D points for one product across its delivery months.
@@ -95,33 +96,6 @@ function ProductCurve({ points, color }: ProductCurveProps) {
   }, [points])
 
   return <primitive ref={lineRef} object={lineObject} />
-}
-
-// ---- Axis labels ----
-// Uses Html (DOM overlay) instead of drei Text to avoid troika font-loading failures.
-function AxisLabel({
-  position,
-  text,
-}: {
-  position: [number, number, number]
-  text: string
-}) {
-  return (
-    <Html position={position} center style={{ pointerEvents: 'none' }}>
-      <span
-        style={{
-          color: '#94a3b8',
-          fontSize: '10px',
-          fontFamily: 'ui-monospace, monospace',
-          whiteSpace: 'nowrap',
-          userSelect: 'none',
-          textShadow: '0 0 4px #0a0e1a',
-        }}
-      >
-        {text}
-      </span>
-    </Html>
-  )
 }
 
 // ---- main component ----
@@ -190,49 +164,51 @@ export default function EnergyCurve3D({ prices, visibleSectors }: EnergyCurve3DP
     return result
   }, [prices, visibleSectors, baseMonth])
 
-  // Month tick labels for X axis (at z=0 level) — every 3 months over 24-month span
-  const monthLabels = useMemo(() => {
-    const labels: Array<{ x: number; text: string }> = []
-    for (let i = 0; i <= 24; i += 3) {
-      const d = new Date(baseMonth)
-      d.setMonth(d.getMonth() + i)
-      labels.push({ x: i, text: monthLabel(d.toISOString()) })
-    }
-    return labels
-  }, [baseMonth])
-
   return (
-    // The Canvas mounts once. Price data changes update geometry via refs — no remount.
-    <Canvas
-      camera={{ position: [24, 120, 60], fov: 50 }}
-      style={{ background: '#0a0e1a' }}
-    >
-      <ambientLight intensity={0.6} />
+    // Wrapper div so we can render the static legend below the Canvas without
+    // using drei Html (which leaks portal divs into the DOM on view switches).
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      {/* The Canvas mounts once. Price data changes update geometry via refs — no remount. */}
+      <Canvas
+        camera={{ position: [24, 120, 60], fov: 50 }}
+        style={{ background: '#0a0e1a' }}
+      >
+        <ambientLight intensity={0.6} />
 
-      {/* X-axis month labels */}
-      {monthLabels.map(({ x, text }) => (
-        <AxisLabel key={x} position={[x, -8, -2]} text={text} />
-      ))}
+        {/* One curve per product symbol */}
+        {curves.map(({ key, points, color }) => (
+          <ProductCurve key={key} points={points} color={color} />
+        ))}
 
-      {/* Y-axis label */}
-      <AxisLabel position={[-3, 50, 0]} text="Price (normalized)" />
+        {/* Grid helpers for orientation */}
+        <gridHelper args={[60, 24, '#1e293b', '#1e293b']} position={[12, 0, 20]} />
 
-      {/* One curve per product symbol */}
-      {curves.map(({ key, points, color }) => (
-        <ProductCurve key={key} points={points} color={color} />
-      ))}
+        <OrbitControls
+          enablePan
+          enableZoom
+          enableRotate
+          target={[12, 50, 10]}
+          minDistance={10}
+          maxDistance={300}
+        />
+      </Canvas>
 
-      {/* Grid helpers for orientation */}
-      <gridHelper args={[60, 24, '#1e293b', '#1e293b']} position={[12, 0, 20]} />
-
-      <OrbitControls
-        enablePan
-        enableZoom
-        enableRotate
-        target={[12, 50, 10]}
-        minDistance={10}
-        maxDistance={300}
-      />
-    </Canvas>
+      {/* Static legend — plain DOM, no drei Html, no portal leaks */}
+      <div
+        style={{
+          position: 'absolute',
+          bottom: 8,
+          left: 10,
+          fontSize: '0.6rem',
+          color: '#475569',
+          pointerEvents: 'none',
+          fontFamily: 'ui-monospace, monospace',
+          lineHeight: 1.6,
+        }}
+      >
+        <div>X: Forward months &nbsp;·&nbsp; Y: Normalized price (0–100) &nbsp;·&nbsp; Z: Product offset</div>
+        <div style={{ color: '#374151', marginTop: 2 }}>Drag to rotate &nbsp;·&nbsp; Scroll to zoom &nbsp;·&nbsp; Shift+drag to pan</div>
+      </div>
+    </div>
   )
 }
