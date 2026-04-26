@@ -77,6 +77,8 @@ export default function PriceChart2D({ prices, visibleSectors }: PriceChart2DPro
 
   // Build chart data: array of { month, "sector:symbol": price, ... }
   const chartData = useMemo(() => {
+    // Key by ISO delivery_month ("2024-02-01") so we can sort chronologically.
+    // Convert to display label only after sorting — shortMonth("Jan 24") is not parseable.
     const monthMap = new Map<string, Record<string, number>>()
 
     for (const [sector, pts] of Object.entries(prices)) {
@@ -85,17 +87,17 @@ export default function PriceChart2D({ prices, visibleSectors }: PriceChart2DPro
         if (!p.delivery_month || p.price <= 0) continue
         const seriesKey = `${sector}:${p.symbol}`
         if (!effectiveSelected.has(seriesKey)) continue
-        const month = shortMonth(p.delivery_month)
-        const row = monthMap.get(month) ?? {}
-        // Prefer EIA monthly history over YF single-point for same symbol+month
+        const isoKey = p.delivery_month // "YYYY-MM-01"
+        const row = monthMap.get(isoKey) ?? {}
         if (!(seriesKey in row)) row[seriesKey] = p.price
-        monthMap.set(month, row)
+        monthMap.set(isoKey, row)
       }
     }
 
+    // ISO date strings sort lexicographically = chronologically.
     return Array.from(monthMap.entries())
-      .map(([month, vals]) => ({ month, ...vals }))
-      .sort((a, b) => new Date(a.month).getTime() - new Date(b.month).getTime())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([isoKey, vals]) => ({ month: shortMonth(isoKey), ...vals }))
   }, [prices, visibleSectors, effectiveSelected])
 
   // Y axis domain: fit to actual selected data with 5 % padding — never start at 0

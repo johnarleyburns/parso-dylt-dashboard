@@ -583,6 +583,12 @@ func resolveClusterDNS(ctx context.Context, domain string) []DNSRecord {
 		hostname string
 		rrType   string
 	}
+	// The CF Pages frontend lives at oilfield-dash.<base>, not dash.<domain>.
+	// Derive base by dropping the first label: "oilfield.parso.guru" → "parso.guru".
+	baseDomain := domain
+	if i := strings.IndexByte(domain, '.'); i >= 0 {
+		baseDomain = domain[i+1:]
+	}
 	queries := []query{
 		{domain, "A"},
 		{"n1." + domain, "A"},
@@ -591,7 +597,9 @@ func resolveClusterDNS(ctx context.Context, domain string) []DNSRecord {
 		{"ctrl." + domain, "A"},
 		{"etcd." + domain, "A"},
 		{"api." + domain, "A"},
-		{"dash." + domain, "CNAME"},
+		// CF Pages custom domain is a sibling zone (oilfield-dash.parso.guru),
+		// proxied through Cloudflare so it exposes A records, not a CNAME.
+		{"oilfield-dash." + baseDomain, "A"},
 	}
 
 	records := make([]DNSRecord, len(queries))
@@ -602,20 +610,11 @@ func resolveClusterDNS(ctx context.Context, domain string) []DNSRecord {
 		go func() {
 			defer wg.Done()
 			rec := DNSRecord{Hostname: q.hostname, Type: q.rrType}
-			if q.rrType == "CNAME" {
-				cname, err := resolver.LookupCNAME(ctx, q.hostname)
-				if err != nil {
-					rec.Error = err.Error()
-				} else {
-					rec.Values = []string{strings.TrimSuffix(cname, ".")}
-				}
+			addrs, err := resolver.LookupHost(ctx, q.hostname)
+			if err != nil {
+				rec.Error = err.Error()
 			} else {
-				addrs, err := resolver.LookupHost(ctx, q.hostname)
-				if err != nil {
-					rec.Error = err.Error()
-				} else {
-					rec.Values = addrs
-				}
+				rec.Values = addrs
 			}
 			records[i] = rec
 		}()
