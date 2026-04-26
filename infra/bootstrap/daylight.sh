@@ -83,6 +83,11 @@ election-timeout: 2500
 auto-compaction-mode: 'periodic'
 auto-compaction-retention: '1h'
 
+# Raise slow-apply warning threshold from 100ms to 300ms.
+# Budget VPS NVMe/SSD disk I/O consistently runs 115-300ms per etcd read;
+# the 100ms default floods the log with spurious warnings.
+experimental-warning-apply-duration: 300000000
+
 log-level: 'warn'
 EOF
 chmod 640 /etc/etcd/etcd.conf.yml

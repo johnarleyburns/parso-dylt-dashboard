@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -417,8 +418,9 @@ func parseMetrics(raw string) NodeMetrics {
 // ---- per-node SSH caches ----
 
 type nodeSSHCache struct {
-	metrics ttlCache
-	logs    ttlCache
+	metrics  ttlCache
+	logs     ttlCache
+	services ttlCache
 }
 
 var (
@@ -433,11 +435,193 @@ func getSSHCache(name string, metricsTTL, logsTTL time.Duration) *nodeSSHCache {
 		return c
 	}
 	c := &nodeSSHCache{
-		metrics: ttlCache{ttl: metricsTTL},
-		logs:    ttlCache{ttl: logsTTL},
+		metrics:  ttlCache{ttl: metricsTTL},
+		logs:     ttlCache{ttl: logsTTL},
+		services: ttlCache{ttl: 30 * time.Second},
 	}
 	sshCaches[name] = c
 	return c
+}
+
+// ---- etcd KV index (read-only, no values) ----
+
+// EtcdKVEntry is key metadata returned by the etcd browser endpoint.
+// Values are never included.
+type EtcdKVEntry struct {
+	Key     string `json:"key"`
+	SizeB   int    `json:"size_b"`
+	Version int64  `json:"version"`
+}
+
+// etcdRangePrefix lists all KV entries under prefix from the first responding
+// etcd v3 HTTP gateway. Only key path and value size are returned; raw values
+// are not exposed.
+func etcdRangePrefix(ctx context.Context, etcdURLs []string, prefix string) ([]EtcdKVEntry, error) {
+	key := base64.StdEncoding.EncodeToString([]byte(prefix))
+	endBytes := []byte(prefix)
+	endBytes[len(endBytes)-1]++
+	rangeEnd := base64.StdEncoding.EncodeToString(endBytes)
+
+	reqBody, _ := json.Marshal(map[string]any{
+		"key":       key,
+		"range_end": rangeEnd,
+	})
+
+	cl := &http.Client{Timeout: 8 * time.Second}
+	var lastErr error
+	for _, base := range etcdURLs {
+		req, err := http.NewRequestWithContext(ctx, "POST", base+"/v3/kv/range",
+			strings.NewReader(string(reqBody)))
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := cl.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		var raw struct {
+			KVs []struct {
+				Key     string `json:"key"`
+				Value   string `json:"value"`
+				Version string `json:"version"`
+			} `json:"kvs"`
+		}
+		err = json.NewDecoder(resp.Body).Decode(&raw)
+		resp.Body.Close()
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		entries := make([]EtcdKVEntry, 0, len(raw.KVs))
+		for _, kv := range raw.KVs {
+			keyBytes, _ := base64.StdEncoding.DecodeString(kv.Key)
+			valBytes, _ := base64.StdEncoding.DecodeString(kv.Value)
+			var ver int64
+			fmt.Sscanf(kv.Version, "%d", &ver)
+			entries = append(entries, EtcdKVEntry{
+				Key:     string(keyBytes),
+				SizeB:   len(valBytes),
+				Version: ver,
+			})
+		}
+		return entries, nil
+	}
+	return nil, lastErr
+}
+
+// ---- systemd service status (SSH pull) ----
+
+// ServiceStatus describes one systemd unit.
+type ServiceStatus struct {
+	Unit        string `json:"unit"`
+	LoadState   string `json:"load_state"`
+	ActiveState string `json:"active_state"`
+	SubState    string `json:"sub_state"`
+	Description string `json:"description"`
+}
+
+// parseServiceStatus parses `systemctl show` output: property=value lines
+// separated by blank lines between units.
+func parseServiceStatus(raw string) []ServiceStatus {
+	var result []ServiceStatus
+	cur := ServiceStatus{}
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			if cur.Unit != "" {
+				result = append(result, cur)
+				cur = ServiceStatus{}
+			}
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		switch k {
+		case "Id":
+			cur.Unit = v
+		case "LoadState":
+			cur.LoadState = v
+		case "ActiveState":
+			cur.ActiveState = v
+		case "SubState":
+			cur.SubState = v
+		case "Description":
+			cur.Description = v
+		}
+	}
+	if cur.Unit != "" {
+		result = append(result, cur)
+	}
+	return result
+}
+
+// ---- DNS resolution ----
+
+// DNSRecord is a resolved entry for one cluster hostname.
+type DNSRecord struct {
+	Hostname string   `json:"hostname"`
+	Type     string   `json:"type"`
+	Values   []string `json:"values"`
+	Error    string   `json:"error,omitempty"`
+}
+
+// resolveClusterDNS concurrently resolves all cluster DNS names for domain.
+func resolveClusterDNS(ctx context.Context, domain string) []DNSRecord {
+	resolver := &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			return (&net.Dialer{Timeout: 3 * time.Second}).DialContext(ctx, "udp", "1.1.1.1:53")
+		},
+	}
+
+	type query struct {
+		hostname string
+		rrType   string
+	}
+	queries := []query{
+		{domain, "A"},
+		{"n1." + domain, "A"},
+		{"n2." + domain, "A"},
+		{"n3." + domain, "A"},
+		{"ctrl." + domain, "A"},
+		{"etcd." + domain, "A"},
+		{"api." + domain, "A"},
+		{"dash." + domain, "CNAME"},
+	}
+
+	records := make([]DNSRecord, len(queries))
+	var wg sync.WaitGroup
+	for i, q := range queries {
+		i, q := i, q
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			rec := DNSRecord{Hostname: q.hostname, Type: q.rrType}
+			if q.rrType == "CNAME" {
+				cname, err := resolver.LookupCNAME(ctx, q.hostname)
+				if err != nil {
+					rec.Error = err.Error()
+				} else {
+					rec.Values = []string{strings.TrimSuffix(cname, ".")}
+				}
+			} else {
+				addrs, err := resolver.LookupHost(ctx, q.hostname)
+				if err != nil {
+					rec.Error = err.Error()
+				} else {
+					rec.Values = addrs
+				}
+			}
+			records[i] = rec
+		}()
+	}
+	wg.Wait()
+	return records
 }
 
 // ---- HTTP helpers ----
@@ -673,6 +857,94 @@ func makeHandler(agg *Aggregator, adm *Admin) http.Handler {
 				lines = lines[:len(lines)-1]
 			}
 			return json.Marshal(map[string]any{"node": name, "lines": lines})
+		})
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(data)
+	})
+
+	// ---- Cluster-wide read-only views ----
+
+	// GET /api/v1/cluster/etcd — etcd KV index for /oilfield/ prefix (30 s cache).
+	// Returns key paths and sizes; raw values are never exposed.
+	etcdKVCache := ttlCache{ttl: 30 * time.Second}
+	mux.HandleFunc("GET /api/v1/cluster/etcd", func(w http.ResponseWriter, r *http.Request) {
+		cors(w, r)
+		domain := envOr("OILFIELD_DOMAIN", "oilfield.parso.guru")
+		etcdURLs := []string{
+			"http://n1." + domain + ":2379",
+			"http://n2." + domain + ":2379",
+			"http://n3." + domain + ":2379",
+		}
+		if ep := os.Getenv("ETCD_ENDPOINTS"); ep != "" {
+			for _, e := range strings.Split(ep, ",") {
+				if e = strings.TrimSpace(e); e != "" {
+					etcdURLs = append(etcdURLs, e)
+				}
+			}
+		}
+		data, err := etcdKVCache.get(func() ([]byte, error) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			entries, err := etcdRangePrefix(ctx, etcdURLs, "/oilfield/")
+			if err != nil {
+				return nil, err
+			}
+			return json.Marshal(entries)
+		})
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(data)
+	})
+
+	// GET /api/v1/nodes/{name}/services — systemd unit status via SSH (30 s cache).
+	mux.HandleFunc("GET /api/v1/nodes/{name}/services", func(w http.ResponseWriter, r *http.Request) {
+		cors(w, r)
+		name := r.PathValue("name")
+		domain := envOr("OILFIELD_DOMAIN", "oilfield.parso.guru")
+		host := "deploy@" + name + "." + domain
+		cache := getSSHCache(name, 30*time.Second, 60*time.Second)
+
+		data, err := cache.services.get(func() ([]byte, error) {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			raw, err := sshRun(ctx, host, sshKeyPath(),
+				"systemctl show oilfield-api.service oilfield-scraper.service oilfield-scraper.timer etcd.service nginx.service"+
+					" --no-pager --property=Id,LoadState,ActiveState,SubState,Description 2>&1 || true")
+			if err != nil {
+				return nil, err
+			}
+			return json.Marshal(map[string]any{
+				"node":     name,
+				"services": parseServiceStatus(raw),
+			})
+		})
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(data)
+	})
+
+	// GET /api/v1/cluster/dns — live DNS resolution for all cluster hostnames (60 s cache).
+	dnsCache := ttlCache{ttl: 60 * time.Second}
+	mux.HandleFunc("GET /api/v1/cluster/dns", func(w http.ResponseWriter, r *http.Request) {
+		cors(w, r)
+		domain := envOr("OILFIELD_DOMAIN", "oilfield.parso.guru")
+		data, err := dnsCache.get(func() ([]byte, error) {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			return json.Marshal(resolveClusterDNS(ctx, domain))
 		})
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})

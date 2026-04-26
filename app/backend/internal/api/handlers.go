@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"oilfield/internal/scraper"
@@ -119,15 +120,24 @@ func (s *Server) pricesAll(w http.ResponseWriter, r *http.Request) {
 
 	sectors := []string{"crude", "natgas", "lng", "lpg", "ngls", "electricity", "refined"}
 	result := make(map[string][]scraper.PricePoint, len(sectors))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
 
 	for _, sector := range sectors {
-		var pts []scraper.PricePoint
-		if err := s.store.GetJSON(ctx, "/oilfield/prices/"+sector+"/latest", &pts); err == nil && pts != nil {
+		sector := sector
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var pts []scraper.PricePoint
+			if err := s.store.GetJSON(ctx, "/oilfield/prices/"+sector+"/latest", &pts); err != nil || pts == nil {
+				pts = []scraper.PricePoint{}
+			}
+			mu.Lock()
 			result[sector] = pts
-		} else {
-			result[sector] = []scraper.PricePoint{} // empty slice, not null
-		}
+			mu.Unlock()
+		}()
 	}
+	wg.Wait()
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -159,8 +169,12 @@ func (s *Server) news(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	var eia, iea []scraper.NewsItem
-	s.store.GetJSON(ctx, "/oilfield/news/eia/items", &eia)
-	s.store.GetJSON(ctx, "/oilfield/news/iea/items", &iea)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); s.store.GetJSON(ctx, "/oilfield/news/eia/items", &eia) }()
+	go func() { defer wg.Done(); s.store.GetJSON(ctx, "/oilfield/news/iea/items", &iea) }()
+	wg.Wait()
+
 	if eia == nil {
 		eia = []scraper.NewsItem{}
 	}

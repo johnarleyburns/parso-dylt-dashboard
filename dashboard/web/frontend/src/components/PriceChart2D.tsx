@@ -126,12 +126,14 @@ export default function PriceChart2D({ prices, visibleSectors }: PriceChart2DPro
           padding: '0.5rem 1rem',
           borderBottom: '1px solid #1e293b',
           display: 'flex',
-          flexWrap: 'wrap',
+          flexWrap: 'nowrap',
+          overflowX: 'auto',
+          WebkitOverflowScrolling: 'touch',
           gap: '0.4rem',
           flexShrink: 0,
         }}
       >
-        <span style={{ color: '#64748b', fontSize: '0.65rem', fontWeight: 600, alignSelf: 'center', marginRight: '0.25rem' }}>
+        <span style={{ color: '#64748b', fontSize: '0.65rem', fontWeight: 600, alignSelf: 'center', marginRight: '0.25rem', flexShrink: 0 }}>
           SERIES:
         </span>
         {allSeries.map((s) => {
@@ -150,6 +152,8 @@ export default function PriceChart2D({ prices, visibleSectors }: PriceChart2DPro
                 fontSize: '0.65rem',
                 fontFamily: 'inherit',
                 fontWeight: active ? 600 : 400,
+                flexShrink: 0,
+                whiteSpace: 'nowrap',
               }}
             >
               {s.label}
