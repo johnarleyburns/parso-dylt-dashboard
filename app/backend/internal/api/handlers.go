@@ -119,7 +119,7 @@ func (s *Server) pricesAll(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	sectors := []string{"crude", "natgas", "lng", "lpg", "ngls", "electricity", "refined"}
+	sectors := []string{"crude", "natgas", "lng", "lpg", "ngls", "electricity", "refined", "coal", "carbon"}
 	result := make(map[string][]scraper.PricePoint, len(sectors))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -148,6 +148,7 @@ func (s *Server) pricesSector(w http.ResponseWriter, r *http.Request) {
 	allowed := map[string]bool{
 		"crude": true, "natgas": true, "lng": true,
 		"lpg": true, "ngls": true, "electricity": true, "refined": true,
+		"coal": true, "carbon": true,
 	}
 	if !allowed[sector] {
 		http.Error(w, `{"error":"unknown sector"}`, http.StatusNotFound)
@@ -171,11 +172,17 @@ func (s *Server) news(w http.ResponseWriter, r *http.Request) {
 
 	// Scan all /oilfield/news/*/items keys so new sources need no handler changes.
 	raw, _ := s.store.GetWithPrefix(ctx, "/oilfield/news/")
+	seen := make(map[string]bool)
 	var all []scraper.NewsItem
 	for _, v := range raw {
 		var items []scraper.NewsItem
 		if err := json.Unmarshal([]byte(v), &items); err == nil {
-			all = append(all, items...)
+			for _, item := range items {
+				if !seen[item.URL] {
+					seen[item.URL] = true
+					all = append(all, item)
+				}
+			}
 		}
 	}
 	sort.Slice(all, func(i, j int) bool {

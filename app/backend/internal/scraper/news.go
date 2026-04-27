@@ -45,20 +45,23 @@ func ScrapeNewsRSS(ctx context.Context, feedURL, source string) ([]NewsItem, err
 	return items, nil
 }
 
-// MergeNews prepends fresh items onto existing, deduplicates by URL, trims to max.
+// MergeNews prepends fresh items onto existing, deduplicates by URL across both, trims to max.
+// fresh items are preferred (appear first); duplicates in existing are silently dropped.
 func MergeNews(fresh, existing []NewsItem) []NewsItem {
-	seen := make(map[string]bool, len(existing))
-	for _, item := range existing {
-		seen[item.URL] = true
-	}
+	seen := make(map[string]bool, len(fresh)+len(existing))
 	var merged []NewsItem
 	for _, item := range fresh {
 		if !seen[item.URL] {
-			merged = append(merged, item)
 			seen[item.URL] = true
+			merged = append(merged, item)
 		}
 	}
-	merged = append(merged, existing...)
+	for _, item := range existing {
+		if !seen[item.URL] {
+			seen[item.URL] = true
+			merged = append(merged, item)
+		}
+	}
 	if len(merged) > maxNewsItems {
 		merged = merged[:maxNewsItems]
 	}

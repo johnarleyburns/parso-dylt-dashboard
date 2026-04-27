@@ -60,18 +60,21 @@ func main() {
 	store.Put(ctx, "/oilfield/config/active_node", nodeName)
 	store.Put(ctx, "/oilfield/nodes/"+nodeName+"/status", "ok")
 
-	eia      := scraper.NewEIAClient(eiaKey)
-	yf       := scraper.NewYahooFinanceScraper()
-	inv      := scraper.NewInvestingScraper()
-	fred     := scraper.NewFREDClient()
-	oilprice := scraper.NewOilPriceAPIClient(envOr("OILPRICE_API_KEY", ""))
+	eia       := scraper.NewEIAClient(eiaKey)
+	yf        := scraper.NewYahooFinanceScraper()
+	inv       := scraper.NewInvestingScraper()
+	fred      := scraper.NewFREDClient()
+	oilprice  := scraper.NewOilPriceAPIClient(envOr("OILPRICE_API_KEY", ""))
+	euenergy  := scraper.NewEUEnergyScraper()
+	eurostat  := scraper.NewEurostatClient()
+	aemo      := scraper.NewAEMOClient()
 
 	type sectorResult struct {
 		sector string
 		points []scraper.PricePoint
 	}
 
-	results := make(chan sectorResult, 16)
+	results := make(chan sectorResult, 32)
 	var wg sync.WaitGroup
 
 	run := func(sector string, fn func() []scraper.PricePoint) {
@@ -139,6 +142,18 @@ func main() {
 	} else {
 		log.Printf("[%s] OilPriceAPI disabled — set OILPRICE_API_KEY to enable Dubai, Urals, JKM, Singapore, coal, carbon", nodeName)
 	}
+
+	// euenergy.live — ENTSO-E EPEX day-ahead spot prices for European electricity markets.
+	// Free HTML, no key. Covers ~35 country/zone combinations; we keep one per country.
+	run("electricity/epex", func() []scraper.PricePoint { return euenergy.ScrapeEPEXSpot(ctx) })
+
+	// Eurostat SDMX — EU household electricity prices (bi-annual, EUR/MWh ex-tax).
+	// Free JSON API, no key. Reference baseline for EU retail electricity cost.
+	run("electricity/eurostat", func() []scraper.PricePoint { return eurostat.ScrapeHouseholdElectricity(ctx) })
+
+	// AEMO — Australian NEM real-time spot prices (AUD/MWh), updated every 5 minutes.
+	// Free public API, no key. Five regions: NSW, QLD, SA, TAS, VIC.
+	run("electricity/aemo", func() []scraper.PricePoint { return aemo.ScrapeNEM(ctx) })
 
 	// News RSS — table-driven, one goroutine per source (gofeed, rate-limit friendly)
 	newsSources := []struct {

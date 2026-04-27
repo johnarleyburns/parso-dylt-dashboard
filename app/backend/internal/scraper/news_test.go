@@ -1,6 +1,7 @@
 package scraper
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -93,7 +94,7 @@ func TestMergeNews_DeduplicatesByURL(t *testing.T) {
 func TestMergeNews_TrimsToMax(t *testing.T) {
 	existing := make([]NewsItem, 148)
 	for i := range existing {
-		existing[i] = NewsItem{URL: "https://eia.gov/old/" + string(rune('a'+i%26))}
+		existing[i] = NewsItem{URL: fmt.Sprintf("https://eia.gov/old/%d", i)}
 	}
 	fresh := []NewsItem{
 		{URL: "https://eia.gov/new/1"},
@@ -112,6 +113,61 @@ func TestMergeNews_EmptyExisting(t *testing.T) {
 	merged := MergeNews(fresh, nil)
 	if len(merged) != 1 {
 		t.Fatalf("expected 1 item, got %d", len(merged))
+	}
+}
+
+func TestMergeNews_DeduplicatesWithinExisting(t *testing.T) {
+	// Simulates stale etcd data that already has duplicate URLs baked in.
+	existing := []NewsItem{
+		{URL: "https://oilprice.com/story/1", Title: "LNG exports rise"},
+		{URL: "https://oilprice.com/story/2", Title: "Crude hits $90"},
+		{URL: "https://oilprice.com/story/1", Title: "LNG exports rise"}, // dup
+	}
+	merged := MergeNews(nil, existing)
+	if len(merged) != 2 {
+		t.Errorf("duplicates within existing should be collapsed: got %d items, want 2", len(merged))
+	}
+}
+
+func TestMergeNews_DeduplicatesWithinFresh(t *testing.T) {
+	// RSS feed itself can contain the same URL more than once in different categories.
+	fresh := []NewsItem{
+		{URL: "https://oilprice.com/story/1", Title: "First"},
+		{URL: "https://oilprice.com/story/1", Title: "First (dup from feed)"},
+		{URL: "https://oilprice.com/story/2", Title: "Second"},
+	}
+	merged := MergeNews(fresh, nil)
+	if len(merged) != 2 {
+		t.Errorf("duplicates within fresh should be collapsed: got %d items, want 2", len(merged))
+	}
+}
+
+func TestMergeNews_NoDuplicatesAcrossAll(t *testing.T) {
+	// Combined regression: same URL appears in fresh AND existing AND within existing.
+	url := "https://oilprice.com/story/dup"
+	fresh := []NewsItem{
+		{URL: url, Title: "Dup A"},
+		{URL: url, Title: "Dup A again"},
+		{URL: "https://oilprice.com/story/new", Title: "New"},
+	}
+	existing := []NewsItem{
+		{URL: url, Title: "Dup A old"},
+		{URL: url, Title: "Dup A old again"},
+		{URL: "https://oilprice.com/story/existing", Title: "Old existing"},
+	}
+	merged := MergeNews(fresh, existing)
+	// Only 3 unique URLs: url, /new, /existing
+	if len(merged) != 3 {
+		t.Errorf("expected 3 unique items, got %d", len(merged))
+	}
+	urls := make(map[string]int)
+	for _, item := range merged {
+		urls[item.URL]++
+	}
+	for u, count := range urls {
+		if count > 1 {
+			t.Errorf("URL %q appears %d times, want 1", u, count)
+		}
 	}
 }
 
