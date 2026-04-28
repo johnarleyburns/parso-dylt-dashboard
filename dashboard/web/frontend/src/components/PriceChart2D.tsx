@@ -19,6 +19,8 @@ const SECTOR_COLORS: Record<string, string> = {
   ngls:        '#84cc16',
   electricity: '#a855f7',
   refined:     '#ef4444',
+  coal:        '#78716c',
+  carbon:      '#14b8a6',
 }
 
 function shortMonth(deliveryMonth: string): string {
@@ -60,12 +62,25 @@ export default function PriceChart2D({ prices, visibleSectors }: PriceChart2DPro
 
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set())
 
-  // Auto-select all series when they first appear
-  const effectiveSelected = selectedKeys.size === 0 ? new Set(allSeries.map((s) => s.key)) : selectedKeys
+  // Default: one representative series per sector (first in list). User can toggle more.
+  const defaultSelected = useMemo<Set<string>>(() => {
+    const seen = new Set<string>()
+    const keys = new Set<string>()
+    for (const s of allSeries) {
+      const sector = s.key.split(':')[0]
+      if (!seen.has(sector)) {
+        seen.add(sector)
+        keys.add(s.key)
+      }
+    }
+    return keys
+  }, [allSeries])
+
+  const effectiveSelected = selectedKeys.size === 0 ? defaultSelected : selectedKeys
 
   function toggleSeries(key: string) {
     setSelectedKeys((prev) => {
-      const next = new Set(prev.size === 0 ? allSeries.map((s) => s.key) : prev)
+      const next = new Set(prev.size === 0 ? defaultSelected : prev)
       if (next.has(key)) {
         if (next.size > 1) next.delete(key)
       } else {
@@ -117,9 +132,6 @@ export default function PriceChart2D({ prices, visibleSectors }: PriceChart2DPro
 
   const selectedSeries = allSeries.filter((s) => effectiveSelected.has(s.key))
 
-  // Detect mixed-unit selection so we can warn the user
-  const mixedUnits = new Set(selectedSeries.map((s) => s.unit)).size > 1
-
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#0a0e1a', color: '#e2e8f0' }}>
       {/* Series selector */}
@@ -166,11 +178,6 @@ export default function PriceChart2D({ prices, visibleSectors }: PriceChart2DPro
 
       {/* Chart */}
       <div style={{ flex: 1, padding: '0.75rem 0.5rem 0.5rem', display: 'flex', flexDirection: 'column' }}>
-        {mixedUnits && (
-          <div style={{ fontSize: '0.6rem', color: '#f59e0b', paddingBottom: '0.3rem', paddingLeft: '0.5rem' }}>
-            ⚠ Mixed units — select one sector for a comparable Y axis
-          </div>
-        )}
         {chartData.length === 0 ? (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#475569', fontSize: '0.8rem' }}>
             No price data available

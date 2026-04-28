@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { RefreshCw, AlertTriangle, Box, LineChart, TableIcon, Shield } from 'lucide-react'
+import { RefreshCw, AlertTriangle, Box, LineChart, TableIcon, Shield, TrendingUp } from 'lucide-react'
 
 function ParsoLogo({ size = 32 }: { size?: number }) {
   const h = size
@@ -13,6 +13,7 @@ function ParsoLogo({ size = 32 }: { size?: number }) {
     </svg>
   )
 }
+import DailyPricesBoard from './components/DailyPricesBoard'
 import EnergyCurve3D from './components/EnergyCurve3D'
 import PriceChart2D from './components/PriceChart2D'
 import PriceTable from './components/PriceTable'
@@ -22,7 +23,7 @@ import AdminPanel from './components/AdminPanel'
 import AdminConsole from './components/AdminConsole'
 import type { AllPrices, NewsResponse, AllHealth } from './types'
 
-type ViewMode = '3d' | '2d' | 'table'
+type ViewMode = 'prices' | '3d' | '2d' | 'table'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'https://ctrl.oilfield.parso.guru'
 const PRICE_INTERVAL_MS  = 30_000
@@ -104,7 +105,7 @@ export default function App() {
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
   const [error, setError]     = useState<string | null>(null)
   const [visibleSectors, setVisibleSectors] = useState<Set<string>>(new Set(ALL_SECTORS))
-  const [viewMode, setViewMode] = useState<ViewMode>('3d')
+  const [viewMode, setViewMode] = useState<ViewMode>('prices')
   const [showConsole, setShowConsole] = useState(false)
 
   const mobile = useMobile()
@@ -172,9 +173,10 @@ export default function App() {
 
   const viewButtons = (
     [
-      { mode: '3d'    as ViewMode, icon: <Box size={12} />,       label: '3D' },
-      { mode: '2d'    as ViewMode, icon: <LineChart size={12} />, label: '2D' },
-      { mode: 'table' as ViewMode, icon: <TableIcon size={12} />, label: 'Table' },
+      { mode: 'prices' as ViewMode, icon: <TrendingUp size={12} />, label: 'Prices' },
+      { mode: '3d'     as ViewMode, icon: <Box size={12} />,        label: '3D' },
+      { mode: '2d'     as ViewMode, icon: <LineChart size={12} />,  label: '2D' },
+      { mode: 'table'  as ViewMode, icon: <TableIcon size={12} />,  label: 'Table' },
     ] as const
   ).map(({ mode, icon, label }) => (
     <button
@@ -371,6 +373,9 @@ export default function App() {
           overflow: 'hidden',
           minHeight: 0,
         }}>
+          {viewMode === 'prices' && (
+            <DailyPricesBoard prices={prices} visibleSectors={visibleSectors} />
+          )}
           {viewMode === '3d' && (
             <EnergyCurve3D prices={prices} visibleSectors={visibleSectors} />
           )}
