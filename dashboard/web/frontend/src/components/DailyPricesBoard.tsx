@@ -1,7 +1,12 @@
 import { useMemo } from 'react'
 import type { AllPrices, PricePoint } from '../types'
 
-const SECTOR_ORDER = ['crude', 'natgas', 'lng', 'lpg', 'ngls', 'electricity', 'refined', 'coal', 'carbon']
+// Three fixed columns; ungrouped sectors (ngls, carbon) appended to nearest peer column.
+const COLUMNS: string[][] = [
+  ['crude', 'natgas', 'lng', 'ngls'],
+  ['lpg', 'refined', 'coal', 'carbon'],
+  ['electricity'],
+]
 
 const SECTOR_LABELS: Record<string, string> = {
   crude:       'Crude Oil',
@@ -71,12 +76,9 @@ function monthLabel(iso: string): string {
   return d.toLocaleString('en-US', { month: 'short', year: '2-digit' })
 }
 
-function geoFlag(geo: string): string {
-  const map: Record<string, string> = {
-    'NORTH_AMERICA': '🌎', 'EUROPE': '🌍', 'ASIA': '🌏',
-    'OCEANIA': '🌏', 'GLOBAL': '🌐', 'MIDDLE_EAST': '🌍',
-  }
-  return map[geo] ?? ''
+// US/North America rows sort before all other geographies.
+function geoSortKey(geo: string): string {
+  return geo === 'NORTH_AMERICA' ? '0' : '1_' + geo
 }
 
 interface DailyPricesBoardProps {
@@ -84,12 +86,144 @@ interface DailyPricesBoardProps {
   visibleSectors: Set<string>
 }
 
+function SectorCard({ section }: { section: SectorSection }) {
+  const { sector, rows, latestScrape } = section
+  const color = SECTOR_COLORS[sector] ?? '#94a3b8'
+  const label = SECTOR_LABELS[sector] ?? sector
+
+  const scrapeLabel = useMemo(() => {
+    if (!latestScrape) return ''
+    const d = new Date(latestScrape)
+    return isNaN(d.getTime()) ? '' :
+      d.toLocaleString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC', hour12: false }) + ' UTC'
+  }, [latestScrape])
+
+  return (
+    <div style={{
+      background: '#0d1525',
+      border: '1px solid #1a2332',
+      borderTop: `2px solid ${color}`,
+      borderRadius: 6,
+      overflow: 'hidden',
+    }}>
+      {/* Card header */}
+      <div style={{
+        padding: '0.4rem 0.75rem',
+        background: `${color}12`,
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.5rem',
+        borderBottom: '1px solid #1a2332',
+      }}>
+        <span style={{ color, fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.08em' }}>
+          {label.toUpperCase()}
+        </span>
+        <span style={{ color: '#334155', fontSize: '0.6rem' }}>{rows.length} series</span>
+        {scrapeLabel && (
+          <span style={{ marginLeft: 'auto', color: '#334155', fontSize: '0.55rem' }}>{scrapeLabel}</span>
+        )}
+      </div>
+
+      {/* Column labels */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr 7rem 5rem',
+        padding: '0.2rem 0.75rem',
+        borderBottom: '1px solid #111827',
+      }}>
+        <span style={{ color: '#253248', fontSize: '0.55rem', fontWeight: 600, letterSpacing: '0.06em' }}>NAME</span>
+        <span style={{ color: '#253248', fontSize: '0.55rem', fontWeight: 600, textAlign: 'right' }}>PRICE</span>
+        <span style={{ color: '#253248', fontSize: '0.55rem', fontWeight: 600, textAlign: 'right' }}>CHG</span>
+      </div>
+
+      {/* Price rows */}
+      {rows.map((row, i) => {
+        const up    = row.change !== null && row.change > 0
+        const down  = row.change !== null && row.change < 0
+        const chgColor = up ? '#22c55e' : down ? '#ef4444' : '#475569'
+        const chgTip   = row.prevMonth
+          ? `vs ${monthLabel(row.prevMonth)} (${monthLabel(row.deliveryMonth)})`
+          : 'No previous period available'
+
+        return (
+          <div
+            key={row.symbol}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 7rem 5rem',
+              padding: '0.38rem 0.75rem',
+              borderBottom: i < rows.length - 1 ? '1px solid #0f1623' : 'none',
+              alignItems: 'center',
+              transition: 'background 0.1s',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = '#ffffff07')}
+            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+          >
+            {/* Name + meta */}
+            <div style={{ minWidth: 0, paddingRight: '0.5rem' }}>
+              <div
+                style={{ color: '#c0cfe0', fontSize: '0.7rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.3 }}
+                title={row.name}
+              >
+                {row.name}
+              </div>
+              <div style={{ color: '#2a3a50', fontSize: '0.55rem', marginTop: '0.08rem' }}>
+                {row.symbol} · {row.source}
+              </div>
+            </div>
+
+            {/* Price + unit */}
+            <div style={{ textAlign: 'right' }}>
+              <span style={{
+                color: '#f1f5f9',
+                fontSize: '0.85rem',
+                fontWeight: 700,
+                fontFamily: 'ui-monospace, monospace',
+                fontVariantNumeric: 'tabular-nums',
+                letterSpacing: '-0.01em',
+              }}>
+                {row.price > 0 ? fmtPrice(row.price) : '—'}
+              </span>
+              <div style={{ color: '#2e4060', fontSize: '0.55rem', marginTop: '0.05rem' }}>{row.unit}</div>
+            </div>
+
+            {/* Change */}
+            <div style={{ textAlign: 'right' }} title={chgTip}>
+              {row.change !== null ? (
+                <>
+                  <div style={{
+                    color: chgColor,
+                    fontSize: '0.7rem',
+                    fontFamily: 'ui-monospace, monospace',
+                    fontVariantNumeric: 'tabular-nums',
+                    fontWeight: 600,
+                  }}>
+                    {up ? '▲' : down ? '▼' : '—'} {fmtChange(row.change)}
+                  </div>
+                  {row.changePct !== null && (
+                    <div style={{ color: chgColor, fontSize: '0.6rem', opacity: 0.75 }}>
+                      {fmtPct(row.changePct)}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <span style={{ color: '#1e293b', fontSize: '0.65rem' }}>—</span>
+              )}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 export default function DailyPricesBoard({ prices, visibleSectors }: DailyPricesBoardProps) {
-  const sections = useMemo<SectorSection[]>(() => {
-    return SECTOR_ORDER.flatMap((sector) => {
-      if (!visibleSectors.has(sector)) return []
+  const sectionsMap = useMemo<Map<string, SectorSection>>(() => {
+    const map = new Map<string, SectorSection>()
+    for (const sector of COLUMNS.flat()) {
+      if (!visibleSectors.has(sector)) continue
       const pts: PricePoint[] = prices[sector] ?? []
-      if (pts.length === 0) return []
+      if (pts.length === 0) continue
 
       const bySymbol = new Map<string, PricePoint[]>()
       for (const p of pts) {
@@ -121,25 +255,30 @@ export default function DailyPricesBoard({ prices, visibleSectors }: DailyPrices
         })
       }
 
-      // Sort by geography then name for consistency
-      rows.sort((a, b) => a.geography.localeCompare(b.geography) || a.name.localeCompare(b.name))
+      // US / North America first, then alphabetically by name within each geo group.
+      rows.sort((a, b) => {
+        const gA = geoSortKey(a.geography)
+        const gB = geoSortKey(b.geography)
+        if (gA !== gB) return gA.localeCompare(gB)
+        return a.name.localeCompare(b.name)
+      })
 
-      return [{ sector, rows, latestScrape }]
-    })
+      map.set(sector, { sector, rows, latestScrape })
+    }
+    return map
   }, [prices, visibleSectors])
 
-  // Latest scraped_at across all visible sectors for the header
   const asOf = useMemo(() => {
     let latest = ''
-    for (const s of sections) {
+    for (const s of sectionsMap.values()) {
       if (s.latestScrape > latest) latest = s.latestScrape
     }
     if (!latest) return null
     const d = new Date(latest)
     return isNaN(d.getTime()) ? null : d
-  }, [sections])
+  }, [sectionsMap])
 
-  if (sections.length === 0) {
+  if (sectionsMap.size === 0) {
     return (
       <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0a0e1a', color: '#475569', fontSize: '0.8rem' }}>
         No price data available
@@ -152,7 +291,7 @@ export default function DailyPricesBoard({ prices, visibleSectors }: DailyPrices
 
       {/* Board header */}
       <div style={{
-        padding: '0.45rem 1rem',
+        padding: '0.4rem 1rem',
         borderBottom: '1px solid #1e293b',
         display: 'flex',
         alignItems: 'baseline',
@@ -165,165 +304,27 @@ export default function DailyPricesBoard({ prices, visibleSectors }: DailyPrices
         </span>
         {asOf && (
           <>
-            <span style={{ color: '#334155', fontSize: '0.6rem' }}>·</span>
+            <span style={{ color: '#1e293b', fontSize: '0.6rem' }}>·</span>
             <span style={{ color: '#475569', fontSize: '0.6rem' }}>
               as of {asOf.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC', hour12: false })} UTC
             </span>
           </>
         )}
-        <span style={{ marginLeft: 'auto', color: '#334155', fontSize: '0.55rem', fontStyle: 'italic' }}>
+        <span style={{ marginLeft: 'auto', color: '#253248', fontSize: '0.55rem', fontStyle: 'italic' }}>
           Chg vs prev scraped period
         </span>
       </div>
 
-      {/* Scrollable grid of sector cards */}
-      <div style={{
-        flex: 1,
-        overflow: 'auto',
-        padding: '0.75rem',
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))',
-        gap: '0.75rem',
-        alignContent: 'start',
-      }}>
-        {sections.map(({ sector, rows, latestScrape }) => {
-          const color = SECTOR_COLORS[sector] ?? '#94a3b8'
-          const label = SECTOR_LABELS[sector] ?? sector
-          const scrapeTime = latestScrape ? new Date(latestScrape) : null
-          const scrapeLabel = scrapeTime && !isNaN(scrapeTime.getTime())
-            ? scrapeTime.toLocaleString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC', hour12: false }) + ' UTC'
-            : ''
-
-          return (
-            <div
-              key={sector}
-              style={{
-                background: '#0d1525',
-                border: '1px solid #1a2332',
-                borderTop: `2px solid ${color}`,
-                borderRadius: 6,
-                overflow: 'hidden',
-              }}
-            >
-              {/* Card header */}
-              <div style={{
-                padding: '0.45rem 0.75rem',
-                background: `${color}12`,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                borderBottom: '1px solid #1a2332',
-              }}>
-                <span style={{ color, fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.08em' }}>
-                  {label.toUpperCase()}
-                </span>
-                <span style={{ color: '#334155', fontSize: '0.6rem' }}>{rows.length} series</span>
-                {scrapeLabel && (
-                  <span style={{ marginLeft: 'auto', color: '#334155', fontSize: '0.55rem' }}>{scrapeLabel}</span>
-                )}
-              </div>
-
-              {/* Column header */}
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr 7rem 5rem',
-                padding: '0.25rem 0.75rem',
-                borderBottom: '1px solid #111827',
-              }}>
-                <span style={{ color: '#334155', fontSize: '0.55rem', fontWeight: 600, letterSpacing: '0.06em' }}>NAME</span>
-                <span style={{ color: '#334155', fontSize: '0.55rem', fontWeight: 600, textAlign: 'right' }}>PRICE</span>
-                <span style={{ color: '#334155', fontSize: '0.55rem', fontWeight: 600, textAlign: 'right' }}>CHG</span>
-              </div>
-
-              {/* Price rows */}
-              {rows.map((row, i) => {
-                const up   = row.change !== null && row.change > 0
-                const down = row.change !== null && row.change < 0
-                const chgColor = up ? '#22c55e' : down ? '#ef4444' : '#475569'
-                const chgTip = row.prevMonth
-                  ? `vs ${monthLabel(row.prevMonth)} (${monthLabel(row.deliveryMonth)})`
-                  : 'No previous period available'
-
-                return (
-                  <div
-                    key={row.symbol}
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: '1fr 7rem 5rem',
-                      padding: '0.4rem 0.75rem',
-                      borderBottom: i < rows.length - 1 ? '1px solid #0f1623' : 'none',
-                      alignItems: 'center',
-                      transition: 'background 0.1s',
-                    }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = '#ffffff07')}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                  >
-                    {/* Name + meta */}
-                    <div style={{ minWidth: 0, paddingRight: '0.5rem' }}>
-                      <div style={{
-                        color: '#c0cfe0',
-                        fontSize: '0.7rem',
-                        fontWeight: 500,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        lineHeight: 1.3,
-                      }}
-                        title={row.name}
-                      >
-                        {geoFlag(row.geography)} {row.name}
-                      </div>
-                      <div style={{ color: '#334155', fontSize: '0.55rem', marginTop: '0.1rem' }}>
-                        {row.symbol} · {row.source}
-                      </div>
-                    </div>
-
-                    {/* Price + unit */}
-                    <div style={{ textAlign: 'right' }}>
-                      <span style={{
-                        color: '#f1f5f9',
-                        fontSize: '0.85rem',
-                        fontWeight: 700,
-                        fontFamily: 'ui-monospace, monospace',
-                        fontVariantNumeric: 'tabular-nums',
-                        letterSpacing: '-0.01em',
-                      }}>
-                        {row.price > 0 ? fmtPrice(row.price) : '—'}
-                      </span>
-                      <div style={{ color: '#475569', fontSize: '0.55rem', marginTop: '0.05rem' }}>
-                        {row.unit}
-                      </div>
-                    </div>
-
-                    {/* Change */}
-                    <div style={{ textAlign: 'right' }} title={chgTip}>
-                      {row.change !== null ? (
-                        <>
-                          <div style={{
-                            color: chgColor,
-                            fontSize: '0.7rem',
-                            fontFamily: 'ui-monospace, monospace',
-                            fontVariantNumeric: 'tabular-nums',
-                            fontWeight: 600,
-                          }}>
-                            {up ? '▲' : down ? '▼' : '—'} {fmtChange(row.change)}
-                          </div>
-                          {row.changePct !== null && (
-                            <div style={{ color: chgColor, fontSize: '0.6rem', opacity: 0.75 }}>
-                              {fmtPct(row.changePct)}
-                            </div>
-                          )}
-                        </>
-                      ) : (
-                        <span style={{ color: '#1e293b', fontSize: '0.65rem' }}>—</span>
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )
-        })}
+      {/* Three fixed columns */}
+      <div style={{ flex: 1, overflow: 'auto', padding: '0.65rem', display: 'flex', gap: '0.65rem', alignItems: 'flex-start' }}>
+        {COLUMNS.map((colSectors, colIdx) => (
+          <div key={colIdx} style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.65rem', minWidth: 0 }}>
+            {colSectors.map((sector) => {
+              const section = sectionsMap.get(sector)
+              return section ? <SectorCard key={sector} section={section} /> : null
+            })}
+          </div>
+        ))}
       </div>
     </div>
   )
