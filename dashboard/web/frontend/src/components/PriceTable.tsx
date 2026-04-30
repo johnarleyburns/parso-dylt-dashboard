@@ -12,7 +12,7 @@ type SortKey = keyof PricePoint
 type SortDir = 'asc' | 'desc'
 
 export default function PriceTable({ prices, visibleSectors }: PriceTableProps) {
-  const [sortKey, setSortKey] = useState<SortKey>('delivery_month')
+  const [sortKey, setSortKey] = useState<SortKey>('name')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [filterText, setFilterText] = useState('')
 

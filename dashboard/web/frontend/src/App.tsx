@@ -186,9 +186,9 @@ export default function App() {
         gap: '0.2rem',
         padding: '0.25rem 0.45rem',
         borderRadius: 4,
-        border: `1px solid ${viewMode === mode ? '#3b82f6' : '#1e293b'}`,
+        border: `1px solid ${viewMode === mode ? '#3b82f6' : '#334155'}`,
         background: viewMode === mode ? '#3b82f622' : 'transparent',
-        color: viewMode === mode ? '#3b82f6' : '#475569',
+        color: viewMode === mode ? '#3b82f6' : '#94a3b8',
         cursor: 'pointer',
         fontSize: '0.65rem',
         fontFamily: 'inherit',
@@ -233,7 +233,7 @@ export default function App() {
               </span>
             )}
             {lastRefresh && (
-              <span style={{ color: '#475569', fontSize: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.2rem', flexShrink: 0 }}>
+              <span style={{ color: '#94a3b8', fontSize: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.2rem', flexShrink: 0 }}>
                 <RefreshCw size={9} />
                 {lastRefresh.toLocaleTimeString('en-US', { hour12: false })}
               </span>
@@ -294,7 +294,7 @@ export default function App() {
               </span>
             )}
             {lastRefresh && (
-              <span style={{ color: '#475569', fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+              <span style={{ color: '#94a3b8', fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                 <RefreshCw size={10} />
                 {lastRefresh.toLocaleTimeString('en-US', { hour12: false })} UTC
               </span>
