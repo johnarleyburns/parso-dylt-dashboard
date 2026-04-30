@@ -372,7 +372,7 @@ export default function App() {
           minHeight: 0,
         }}>
           {viewMode === 'prices' && (
-            <DailyPricesBoard prices={prices} visibleSectors={visibleSectors} />
+            <DailyPricesBoard prices={prices} visibleSectors={visibleSectors} mobile={mobile} />
           )}
           {viewMode === '3d' && (
             <EnergyCurve3D prices={prices} visibleSectors={visibleSectors} />
