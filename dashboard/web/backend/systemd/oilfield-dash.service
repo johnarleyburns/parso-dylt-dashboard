@@ -9,7 +9,7 @@ User=deploy
 Group=deploy
 EnvironmentFile=/etc/daylight/node.conf
 Environment=OILFIELD_DOMAIN=oilfield.parso.guru
-Environment=DASH_ORIGIN=https://dash.oilfield.parso.guru
+Environment=DASH_ORIGIN=https://oilfield-dash.parso.guru
 ExecStart=/opt/oilfield/bin/oilfield-dash-web
 Restart=always
 RestartSec=5

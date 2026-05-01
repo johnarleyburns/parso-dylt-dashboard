@@ -19,11 +19,27 @@ import NewsPanel from './components/NewsPanel'
 import NodeHealthGrid from './components/NodeHealthGrid'
 import AdminPanel from './components/AdminPanel'
 import AdminConsole from './components/AdminConsole'
-import type { AllPrices, NewsResponse, AllHealth } from './types'
+import type { AllPrices, NewsResponse, AllHealth, NodeHealth } from './types'
 
 type ViewMode = 'prices' | '3d' | '2d' | 'table'
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? 'https://ctrl.oilfield.parso.guru'
+// Runtime nodes for prices/news — raced in parallel; first 2xx wins.
+// Override with VITE_RUNTIME_NODES="https://n1.example.com,https://n2.example.com,...".
+const RUNTIME_NODES: { name: string; base: string }[] = (() => {
+  const env = import.meta.env.VITE_RUNTIME_NODES as string | undefined
+  if (env) {
+    return env.split(',').map((s) => {
+      const base = s.trim()
+      return { name: new URL(base).hostname.split('.')[0], base }
+    })
+  }
+  return [
+    { name: 'n1', base: 'https://n1.oilfield.parso.guru' },
+    { name: 'n2', base: 'https://n2.oilfield.parso.guru' },
+    { name: 'n3', base: 'https://n3.oilfield.parso.guru' },
+  ]
+})()
+
 const PRICE_INTERVAL_MS  = 30_000
 const NEWS_INTERVAL_MS   = 300_000
 const HEALTH_INTERVAL_MS = 15_000
@@ -81,18 +97,21 @@ function useLandscape(): boolean {
   return landscape
 }
 
-async function apiFetch<T>(path: string): Promise<T> {
-  const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), 10_000)
+// Race all runtime nodes for path; resolves with the first 2xx body.
+// Cancels remaining in-flight requests once a winner responds.
+async function raceNodes<T>(path: string): Promise<T> {
+  const ac = new AbortController()
+  const timer = setTimeout(() => ac.abort(), 10_000)
   try {
-    const resp = await fetch(API_BASE + path, {
-      headers: { Accept: 'application/json' },
-      signal: ctrl.signal,
-    })
-    if (!resp.ok) throw new Error(`HTTP ${resp.status} from ${path}`)
-    return resp.json() as Promise<T>
+    return await Promise.any(
+      RUNTIME_NODES.map(({ base }) =>
+        fetch(base + path, { headers: { Accept: 'application/json' }, signal: ac.signal })
+          .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() as Promise<T> })
+      )
+    )
   } finally {
     clearTimeout(timer)
+    ac.abort() // cancel any still-in-flight sibling requests
   }
 }
 
@@ -114,7 +133,7 @@ export default function App() {
 
   const fetchPrices = useCallback(async () => {
     try {
-      const data = await apiFetch<AllPrices>('/api/v1/prices/all')
+      const data = await raceNodes<AllPrices>('/api/v1/prices/all')
       setPrices(data)
       setLastRefresh(new Date())
       setError(null)
@@ -125,20 +144,36 @@ export default function App() {
 
   const fetchNews = useCallback(async () => {
     try {
-      const data = await apiFetch<NewsResponse>('/api/v1/news')
+      const data = await raceNodes<NewsResponse>('/api/v1/news')
       setNews(data)
     } catch {
       // news failure is non-fatal; keep existing data
     }
   }, [])
 
+  // Fan out to each node individually and assemble AllHealth locally —
+  // no ctrl dependency; unreachable nodes appear as "offline".
   const fetchHealth = useCallback(async () => {
-    try {
-      const data = await apiFetch<AllHealth>('/api/v1/health/all')
-      setHealth(data)
-    } catch {
-      // health failure is non-fatal
+    const settled = await Promise.allSettled(
+      RUNTIME_NODES.map(async ({ name, base }) => {
+        const ac = new AbortController()
+        const timer = setTimeout(() => ac.abort(), 10_000)
+        try {
+          const r = await fetch(base + '/api/v1/health', { headers: { Accept: 'application/json' }, signal: ac.signal })
+          if (!r.ok) throw new Error(`HTTP ${r.status}`)
+          return r.json() as Promise<NodeHealth>
+        } catch {
+          return { node: name, status: 'offline' as const, etcd_healthy: false, provider: '' }
+        } finally {
+          clearTimeout(timer)
+        }
+      })
+    )
+    const health: AllHealth = {}
+    for (const r of settled) {
+      if (r.status === 'fulfilled') health[r.value.node] = r.value
     }
+    setHealth(health)
   }, [])
 
   useEffect(() => {
