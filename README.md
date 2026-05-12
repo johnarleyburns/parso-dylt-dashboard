@@ -171,8 +171,8 @@ parso-dylt-dashboard/
 │   ├── provision/            # Create VMs via each provider's REST API
 │   │   ├── hetzner.sh
 │   │   ├── linode.sh
-│   │   ├── ionos.sh          # NOTE: requires Ionos Cloud account (cloud.ionos.com)
-│   │   │                     #   OR set IONOS_VPS_IP manually and run ionos-bootstrap.sh
+│   │   ├── ionos.sh              # Ionos Cloud IaaS (cloud.ionos.com) — requires separate account
+│   │   ├── ionos-bootstrap.sh    # Manual-VPS flow: install SSH key + base.sh from IONOS_VPS_IP
 │   │   └── upcloud.sh
 │   ├── bootstrap/            # Remote scripts piped via SSH
 │   │   ├── base.sh           # apt packages, SSH hardening, UFW, deploy user
@@ -292,7 +292,9 @@ ssh-keygen -t ed25519 -f ~/.ssh/oilfield_ed25519 -N "" -C "oilfield-deploy"
 # No passphrase (-N "") so up.sh can use it non-interactively.
 ```
 
-Then send `~/.ssh/oilfield_ed25519.pub` to the sender so they can upload it to all four cloud provider SSH key stores before you run `up.sh`. If this is a fresh teardown/rebuild cycle on existing provider accounts, the key is already registered — no action needed.
+Then send `~/.ssh/oilfield_ed25519.pub` to the sender so they can upload it to the Hetzner, Linode, and UpCloud SSH key stores before you run `up.sh`. If this is a fresh teardown/rebuild cycle on existing provider accounts, the key is already registered — no action needed.
+
+> **Ionos VPS (N3) is different.** The Ionos consumer VPS product does not support pre-registered SSH keys. Instead, set `IONOS_VPS_PASSWORD` in `.env` with the root password from the VPS creation step. `up.sh` will install the oilfield SSH key onto the VPS automatically on first run using that password, then disable password auth.
 
 Confirm the key is present and has the right permissions:
 ```bash
@@ -302,7 +304,24 @@ ls -la ~/.ssh/oilfield_ed25519 ~/.ssh/oilfield_ed25519.pub
 
 ### 5. Bring up the cluster
 
-With the repo cloned, `.env` in place, and SSH key ready:
+> **Before running `up.sh` — create the Ionos N3 VPS manually.**
+>
+> N1, N2, and N4 are provisioned automatically via their provider APIs. **N3 (Ionos) is the exception** — the Ionos consumer VPS product has no provisioning API, so the server must be created by hand:
+>
+> 1. Log into [my.ionos.com](https://my.ionos.com)
+> 2. Create a new VPS — **VPS S or larger** is recommended (2 vCPU / 2 GB RAM). The XS (1 vCPU / 1 GB RAM) works but is tight for etcd under load.
+> 3. Choose **Ubuntu 24.04** as the OS.
+> 4. Note the **public IP address** and **root password** shown after creation.
+> 5. Add both to `infra/.env`:
+>    ```
+>    IONOS_VPS_IP=<your-vps-ip>
+>    IONOS_VPS_PASSWORD=<root-password-from-creation>
+>    ```
+> 6. **Do not SSH into it yet** — `up.sh` handles all bootstrapping.
+>
+> Once the VPS exists and `.env` has its IP and password, proceed:
+
+With the repo cloned, `.env` in place, SSH key ready, and the Ionos VPS created:
 
 ```bash
 ./infra/up.sh
@@ -368,7 +387,9 @@ All three runtime nodes should show `"status": "ok"` and `"etcd_healthy": true`.
 ./infra/teardown/teardown-all.sh
 ```
 
-Prompts for confirmation, then deletes all four VMs, removes `infra/state/*.ip`, clears `cluster.env`, and purges stale SSH known_hosts entries for all cluster hostnames. DNS records are left in place by default (they cost nothing and `up.sh` will overwrite them on the next cycle).
+Prompts for confirmation, then deletes N1 (Hetzner), N2 (Linode), and N4 (UpCloud) via their APIs, removes `infra/state/*.ip`, clears `cluster.env`, and purges stale SSH known_hosts entries for all cluster hostnames. DNS records are left in place by default (they cost nothing and `up.sh` will overwrite them on the next cycle).
+
+> **Ionos N3 requires manual deletion.** The Ionos VPS product has no API for server deletion. The teardown script will clean up DNS records and state files, but you must **manually delete the VPS at [my.ionos.com](https://my.ionos.com)** to stop billing. The script will print a reminder with the IP address.
 
 To also delete the DNS records:
 ```bash
@@ -409,6 +430,8 @@ oilfield-dash prices lpg          # LPG
 oilfield-dash prices ngls         # NGLs
 oilfield-dash prices electricity  # electricity
 oilfield-dash prices refined      # refined products
+oilfield-dash prices coal         # coal
+oilfield-dash prices carbon       # carbon credits
 oilfield-dash news                # latest 20 news items
 oilfield-dash news -n 5           # latest 5 news items
 oilfield-dash watch               # auto-refresh every 10s (Ctrl+C to exit)
@@ -650,7 +673,7 @@ All endpoints are unauthenticated and publicly accessible:
 | UpCloud | N4 (control) | DEV-1xCPU-2GB | ~$3.20 |
 | Cloudflare Pages | Frontend CDN | Free tier | $0 |
 | Let's Encrypt | TLS | Free | $0 |
-| **Total** | | | **~$17.40/mo** |
+| **Total** | | | **~$15.40/mo** |
 
 Comparable AWS managed architecture (EKS, RDS, ElastiCache, ALB, CloudFront): **$188–260/month**.
 
