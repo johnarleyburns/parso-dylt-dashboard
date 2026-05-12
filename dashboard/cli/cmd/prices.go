@@ -12,6 +12,7 @@ import (
 var validSectors = map[string]bool{
 	"crude": true, "natgas": true, "lng": true,
 	"lpg": true, "ngls": true, "electricity": true, "refined": true,
+	"coal": true, "carbon": true,
 }
 
 var pricesCmd = &cobra.Command{
@@ -26,7 +27,7 @@ var pricesCmd = &cobra.Command{
 		if len(args) == 1 {
 			s := args[0]
 			if !validSectors[s] {
-				return fmt.Errorf("unknown sector %q — valid: crude natgas lng lpg ngls electricity refined", s)
+				return fmt.Errorf("unknown sector %q — valid: crude natgas lng lpg ngls electricity refined coal carbon", s)
 			}
 			sectors = []string{s}
 		}

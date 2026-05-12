@@ -96,7 +96,7 @@ func Nodes(cluster client.ClusterStatus, healths map[string]client.NodeHealth) s
 // Prices renders a price table for the given sectors. Pass nil sectors for all.
 func Prices(prices client.AllPrices, sectors []string) string {
 	if sectors == nil {
-		sectors = []string{"crude", "natgas", "lng", "lpg", "ngls", "electricity", "refined"}
+		sectors = []string{"crude", "natgas", "lng", "lpg", "ngls", "electricity", "refined", "coal", "carbon"}
 	}
 
 	var b strings.Builder

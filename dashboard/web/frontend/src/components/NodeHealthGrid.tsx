@@ -9,7 +9,7 @@ const STATUS_COLOR: Record<string, string> = {
 const PROVIDER_LABEL: Record<string, string> = {
   hetzner:  'Hetzner / US-East',
   kamatera: 'Kamatera / US-West',
-  scaleway: 'Scaleway / EU-Paris',
+  ionos:    'Ionos / EU-Berlin',
   upcloud:  'UpCloud / US-Central',
 }
 

@@ -323,7 +323,7 @@ type NodeGeo struct {
 var defaultNodeGeos = []NodeGeo{
 	{Name: "n1", Role: "runtime", Lat: 49.45, Lon: 11.08, City: "Nuremberg", Country: "DE", Provider: "Hetzner"},
 	{Name: "n2", Role: "runtime", Lat: 40.74, Lon: -74.18, City: "Newark", Country: "US", Provider: "Linode"},
-	{Name: "n3", Role: "runtime", Lat: 48.86, Lon: 2.35, City: "Paris", Country: "FR", Provider: "Scaleway"},
+	{Name: "n3", Role: "runtime", Lat: 52.52, Lon: 13.40, City: "Berlin", Country: "DE", Provider: "Ionos"},
 	{Name: "n4", Role: "ctrl", Lat: 60.17, Lon: 24.94, City: "Helsinki", Country: "FI", Provider: "UpCloud"},
 }
 

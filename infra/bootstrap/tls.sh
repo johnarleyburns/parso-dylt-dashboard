@@ -5,8 +5,14 @@ set -euo pipefail
 # Run on each node (N1, N2, N3, N4) AFTER dns.sh has been run and DNS has propagated.
 #
 # NODE_NAME, NODE_ROLE, and DOMAIN are read from /etc/daylight/node.conf (written by base.sh).
-# ADMIN_EMAIL is the Let's Encrypt registration email — pass as an env var:
-#   ADMIN_EMAIL=you@example.com bash -s < tls.sh
+# Required env vars:
+#   ADMIN_EMAIL         — Let's Encrypt registration email
+#   CLOUDFLARE_API_TOKEN — Required for runtime nodes (DNS-01 challenge for api.<DOMAIN> SAN)
+#
+# Runtime nodes (N1/N2/N3) use DNS-01 via Cloudflare because api.<DOMAIN> is a round-robin
+# A record — webroot challenges would fail when LE's secondary validator hits a different node
+# than the one that wrote the challenge file.
+# Control node (N4) uses webroot (single A record, no round-robin issue).
 
 source /etc/daylight/node.conf
 
@@ -22,6 +28,9 @@ if [ "${NODE_ROLE}" = "control" ]; then
   NODE_FQDN="ctrl.${DOMAIN}"
 else
   NODE_FQDN="${NODE_NAME}.${DOMAIN}"
+  # Runtime nodes also cover api.<DOMAIN> as a SAN so the CLI/browser TLS checks pass
+  # when hitting https://api.<DOMAIN> and being routed to this node.
+  CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN must be set for runtime nodes}"
 fi
 NGINX_CONF=/etc/nginx/sites-available/oilfield
 CERT_DIR="/etc/letsencrypt/live/${NODE_FQDN}"
@@ -29,27 +38,56 @@ CERT_DIR="/etc/letsencrypt/live/${NODE_FQDN}"
 command -v certbot &>/dev/null || die "certbot not found — was base.sh run?"
 command -v nginx   &>/dev/null || die "nginx not found — was base.sh run?"
 
-# Write minimal HTTP config for webroot challenge
+# Write minimal HTTP config so nginx is up (needed for redirect + control webroot challenge)
 log "Writing initial nginx config for ${NODE_FQDN}..."
 mkdir -p /var/www/certbot
 
-printf 'server {\n    listen 80;\n    server_name %s;\n    location /.well-known/acme-challenge/ { root /var/www/certbot; }\n    location / { return 301 https://$host$request_uri; }\n}\n' \
-  "${NODE_FQDN}" > "${NGINX_CONF}"
+if [ "${NODE_ROLE}" = "runtime" ]; then
+  # Runtime: nginx serves both nX.<DOMAIN> and api.<DOMAIN> on port 80
+  printf 'server {\n    listen 80;\n    server_name %s api.%s;\n    location /.well-known/acme-challenge/ { root /var/www/certbot; }\n    location / { return 301 https://$host$request_uri; }\n}\n' \
+    "${NODE_FQDN}" "${DOMAIN}" > "${NGINX_CONF}"
+else
+  printf 'server {\n    listen 80;\n    server_name %s;\n    location /.well-known/acme-challenge/ { root /var/www/certbot; }\n    location / { return 301 https://$host$request_uri; }\n}\n' \
+    "${NODE_FQDN}" > "${NGINX_CONF}"
+fi
 
 ln -sf "${NGINX_CONF}" /etc/nginx/sites-enabled/oilfield
 rm -f /etc/nginx/sites-enabled/default
 nginx -t || die "nginx config test failed"
 systemctl reload nginx || systemctl start nginx
 
-# Obtain cert
-log "Obtaining Let's Encrypt cert for ${NODE_FQDN}..."
-certbot certonly \
-  --webroot \
-  --webroot-path /var/www/certbot \
-  --non-interactive \
-  --agree-tos \
-  --email "${ADMIN_EMAIL}" \
-  -d "${NODE_FQDN}"
+# Obtain cert — method differs by role
+if [ "${NODE_ROLE}" = "runtime" ]; then
+  # Install Cloudflare DNS plugin (Ubuntu 24.04 package, no pip needed)
+  log "Installing certbot-dns-cloudflare for DNS-01 challenge..."
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3-certbot-dns-cloudflare
+
+  CF_CREDS=$(mktemp)
+  chmod 600 "$CF_CREDS"
+  printf 'dns_cloudflare_api_token = %s\n' "${CLOUDFLARE_API_TOKEN}" > "$CF_CREDS"
+
+  log "Obtaining Let's Encrypt cert for ${NODE_FQDN} + api.${DOMAIN} (DNS-01)..."
+  certbot certonly \
+    --dns-cloudflare \
+    --dns-cloudflare-credentials "$CF_CREDS" \
+    --dns-cloudflare-propagation-seconds 30 \
+    --non-interactive \
+    --agree-tos \
+    --email "${ADMIN_EMAIL}" \
+    -d "${NODE_FQDN}" \
+    -d "api.${DOMAIN}"
+
+  rm -f "$CF_CREDS"
+else
+  log "Obtaining Let's Encrypt cert for ${NODE_FQDN} (webroot)..."
+  certbot certonly \
+    --webroot \
+    --webroot-path /var/www/certbot \
+    --non-interactive \
+    --agree-tos \
+    --email "${ADMIN_EMAIL}" \
+    -d "${NODE_FQDN}"
+fi
 
 # Write full HTTPS config — proxy target differs by node role
 log "Writing HTTPS nginx config (NODE_ROLE=${NODE_ROLE})..."
@@ -58,14 +96,14 @@ write_nginx_runtime() {
   cat > "${NGINX_CONF}" << EOF
 server {
     listen 80;
-    server_name ${NODE_FQDN};
+    server_name ${NODE_FQDN} api.${DOMAIN};
     location /.well-known/acme-challenge/ { root /var/www/certbot; }
     location / { return 301 https://\$host\$request_uri; }
 }
 
 server {
     listen 443 ssl;
-    server_name ${NODE_FQDN};
+    server_name ${NODE_FQDN} api.${DOMAIN};
 
     ssl_certificate     ${CERT_DIR}/fullchain.pem;
     ssl_certificate_key ${CERT_DIR}/privkey.pem;
@@ -158,6 +196,6 @@ systemctl daemon-reload
 systemctl enable certbot-renew.timer
 systemctl start certbot-renew.timer
 
-log "TLS setup complete for ${NODE_FQDN}"
+log "TLS setup complete for ${NODE_FQDN}$([ "${NODE_ROLE}" = "runtime" ] && echo " (SAN: api.${DOMAIN})" || true)"
 log "  cert:    ${CERT_DIR}/fullchain.pem"
 log "  renewal: certbot-renew.timer (03:00 + 15:00 daily, +-30min jitter)"

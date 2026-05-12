@@ -28,7 +28,7 @@ die() { echo "[dns] ERROR: $*" >&2; exit 1; }
 STATE_DIR="$SCRIPT_DIR/../state"
 N1_IP="$(cat "$STATE_DIR/hetzner.ip"  2>/dev/null)" || die "infra/state/hetzner.ip missing — run hetzner.sh first"
 N2_IP="$(cat "$STATE_DIR/linode.ip"   2>/dev/null)" || die "infra/state/linode.ip missing — run linode.sh first"
-N3_IP="$(cat "$STATE_DIR/scaleway.ip" 2>/dev/null)" || die "infra/state/scaleway.ip missing — run scaleway.sh first"
+N3_IP="$(cat "$STATE_DIR/ionos.ip"    2>/dev/null)" || die "infra/state/ionos.ip missing — run ionos.sh first"
 N4_IP="$(cat "$STATE_DIR/upcloud.ip"  2>/dev/null)" || die "infra/state/upcloud.ip missing — run upcloud.sh first"
 
 log "IPs: N1=$N1_IP  N2=$N2_IP  N3=$N3_IP  N4=$N4_IP"

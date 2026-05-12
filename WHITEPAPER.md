@@ -48,7 +48,7 @@ The oilfield dashboard runs four nodes across three providers:
 |------|----------|----------|------|-------------|
 | N1 | Hetzner | Nuremberg, DE | Scraper + API | \$4.20 |
 | N2 | Linode/Akamai | Newark, US | Scraper + API | \$5.00 |
-| N3 | Scaleway | Paris, FR | Scraper + API | \$5.00 |
+| N3 | Ionos VPS | Berlin, DE | Scraper + API | \$2.00 |
 | N4 | UpCloud | Helsinki, FI | Control + Web dashboard | \$3.20 |
 
 Provider failure eliminates one node. The cluster — coordinated by etcd — continues operating across the remaining three. No managed Kubernetes, no load balancer subscription, no auto-scaling group policy to maintain.
@@ -207,7 +207,7 @@ When a cloud provider has an incident — network partition, hypervisor bug, reg
 
 The etcd cluster maintains quorum with three of four nodes alive. The web dashboard, scrapers, and REST API continue operating. The failed provider's node is simply excluded from the health grid until it recovers.
 
-During this project, N3 (Scaleway) experienced a brief hypervisor pause. The health dashboard showed N3 as degraded. N1, N2, and N4 continued serving requests. No alert fired. N3 recovered and rejoined without intervention.
+During this project, N3 (Ionos) experienced a brief hypervisor pause. The health dashboard showed N3 as degraded. N1, N2, and N4 continued serving requests. No alert fired. N3 recovered and rejoined without intervention.
 
 ### 4.2 The Cost of Redundancy at Each Price Point
 

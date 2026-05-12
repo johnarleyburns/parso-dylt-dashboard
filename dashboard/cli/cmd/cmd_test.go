@@ -61,8 +61,8 @@ func TestEnvOr_UsesFallback(t *testing.T) {
 
 // ---- validSectors ----
 
-func TestValidSectors_ContainsAllSeven(t *testing.T) {
-	for _, s := range []string{"crude", "natgas", "lng", "lpg", "ngls", "electricity", "refined"} {
+func TestValidSectors_ContainsAllNine(t *testing.T) {
+	for _, s := range []string{"crude", "natgas", "lng", "lpg", "ngls", "electricity", "refined", "coal", "carbon"} {
 		if !validSectors[s] {
 			t.Errorf("validSectors missing %q", s)
 		}
@@ -194,7 +194,7 @@ func TestNodesCmd_ShowsNodeNames(t *testing.T) {
 		Nodes: map[string]*client.NodeStatus{
 			"n1": {Provider: "hetzner", Status: "ok"},
 			"n2": {Provider: "kamatera", Status: "ok"},
-			"n3": {Provider: "scaleway", Status: "ok"},
+			"n3": {Provider: "ionos", Status: "ok"},
 		},
 		ActiveNode:     "n1",
 		Scrapelock:     "n1",

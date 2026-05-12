@@ -1,6 +1,6 @@
 # Oilfield — Sovereign Multi-Cloud Energy Market Dashboard
 
-A real-time global energy futures market visualization platform, built as a demonstration of the [Daylight](https://github.com/anomalyco/daylight) architecture: no cloud lock-in, no managed databases, no proprietary orchestration. Four nodes across four independent cloud providers, coordinated by etcd, served behind nginx with Let's Encrypt TLS, for **$17.40/month**.
+A real-time global energy futures market visualization platform, built as a demonstration of the [Daylight](https://github.com/anomalyco/daylight) architecture: no cloud lock-in, no managed databases, no proprietary orchestration. Four nodes across four independent cloud providers, coordinated by etcd, served behind nginx with Let's Encrypt TLS, for **$15.40/month**.
 
 **Live dashboard:** [https://oilfield-dash.parso.guru](https://oilfield-dash.parso.guru) (Cloudflare Pages)  
 **Public API:** [https://oilfield.parso.guru/api/v1/health](https://oilfield.parso.guru/api/v1/health) (round-robin: N1/N2/N3)  
@@ -52,10 +52,10 @@ Data covers nine sectors: crude oil, natural gas, LNG, LPG, NGLs, electricity, r
                 └──────────────────────────────────────────────────┘
 
   ┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────────┐
-  │ N1 — Hetzner Cloud   │  │ N2 — Linode/Akamai  │  │ N3 — Scaleway       │
-  │ Ashburn, VA (US East)│  │ Los Angeles (US West)│  │ Paris, FR (Europe)  │
-  │ cpx11: 2vCPU 4GB RAM │  │ g6-std-1: 1vCPU 2GB │  │ PLAY2-MICRO: 1vCPU  │
-  │ ~$4.20/mo            │  │ ~$6.00/mo            │  │ ~$4.00/mo           │
+  │ N1 — Hetzner Cloud   │  │ N2 — Linode/Akamai  │  │ N3 — Ionos VPS      │
+  │ Ashburn, VA (US East)│  │ Los Angeles (US West)│  │ Berlin, DE (Europe) │
+  │ cpx11: 2vCPU 4GB RAM │  │ g6-std-1: 1vCPU 2GB │  │ VPS XS: 1vCPU 1GB   │
+  │ ~$4.20/mo            │  │ ~$6.00/mo            │  │ ~$2.00/mo           │
   │                      │  │                      │  │                     │
   │  etcd (peer member)  │  │  etcd (peer member)  │  │  etcd (peer member) │
   │  oilfield-api :8080  │  │  oilfield-api :8080  │  │  oilfield-api :8080 │
@@ -89,10 +89,10 @@ Data covers nine sectors: crude oil, natural gas, LNG, LPG, NGLs, electricity, r
 |------|----------|--------|------|------|
 | N1 | Hetzner Cloud | Ashburn, VA | Runtime: etcd + API + scraper | ~$4.20/mo |
 | N2 | Linode/Akamai | Los Angeles, CA | Runtime: etcd + API + scraper | ~$6.00/mo |
-| N3 | Scaleway | Paris, FR | Runtime: etcd + API + scraper | ~$4.00/mo |
+| N3 | Ionos VPS | Berlin, DE | Runtime: etcd + API + scraper | ~$2.00/mo |
 | N4 | UpCloud | Chicago, IL | Control: dashboard backend | ~$3.20/mo |
 | CF | Cloudflare Pages | Global CDN | Frontend (React build) | Free |
-| **Total** | | | | **~$17.40/mo** |
+| **Total** | | | | **~$15.40/mo** |
 
 ---
 
@@ -165,13 +165,14 @@ parso-dylt-dashboard/
 │   ├── state/
 │   │   ├── hetzner.ip        # Written by provision/hetzner.sh
 │   │   ├── linode.ip         # Written by provision/linode.sh
-│   │   ├── scaleway.ip       # Written by provision/scaleway.sh
+│   │   ├── ionos.ip          # Written manually (see N3 note below) or by ionos.sh
 │   │   ├── upcloud.ip        # Written by provision/upcloud.sh
 │   │   └── cluster.env       # Exports N1_IP/N2_IP/N3_IP/N4_IP
 │   ├── provision/            # Create VMs via each provider's REST API
 │   │   ├── hetzner.sh
 │   │   ├── linode.sh
-│   │   ├── scaleway.sh
+│   │   ├── ionos.sh          # NOTE: requires Ionos Cloud account (cloud.ionos.com)
+│   │   │                     #   OR set IONOS_VPS_IP manually and run ionos-bootstrap.sh
 │   │   └── upcloud.sh
 │   ├── bootstrap/            # Remote scripts piped via SSH
 │   │   ├── base.sh           # apt packages, SSH hardening, UFW, deploy user
@@ -260,10 +261,8 @@ EIA_API_KEY=...
 ETCD_CLUSTER_TOKEN=...
 HETZNER_API_TOKEN=...
 LINODE_TOKEN=...
-SCW_ACCESS_KEY=...
-SCW_PROJECT_ID=...
-SCW_SECRET_KEY=...
-SCW_ZONE=fr-par-1
+IONOS_VPS_IP=...          # Set manually after creating VPS at my.ionos.com
+IONOS_VPS_PASSWORD=...    # Root password — used only during initial key install
 UPCLOUD_API_TOKEN=...
 UPCLOUD_ZONE=us-chi1
 SSH_PRIVATE_KEY_PATH=~/.ssh/oilfield_ed25519
@@ -313,7 +312,7 @@ The script runs unattended for approximately **8–12 minutes** and prints progr
 
 | Phase | What happens | Time |
 |-------|-------------|------|
-| 1 — Provision | Creates four VMs in parallel across Hetzner, Linode, Scaleway, UpCloud | ~2–4 min |
+| 1 — Provision | Creates four VMs in parallel across Hetzner, Linode, Ionos, UpCloud | ~2–4 min |
 | 2 — Bootstrap | Installs etcd on N1/N2/N3, forms cluster, drops systemd unit stubs | ~1–2 min |
 | 3 — DNS | Deletes stale Cloudflare A records, creates fresh ones for all FQDNs; polls until propagated | ~1 min |
 | 4 — TLS | Obtains Let's Encrypt certs for n1/n2/n3/ctrl in parallel; configures nginx HTTPS | ~1–2 min |
@@ -647,7 +646,7 @@ All endpoints are unauthenticated and publicly accessible:
 |----------|------|------|---------|
 | Hetzner Cloud | N1 (runtime) | cpx11 (2vCPU/4GB) | ~$4.20 |
 | Linode/Akamai | N2 (runtime) | g6-standard-1 (1vCPU/2GB) | ~$6.00 |
-| Scaleway | N3 (runtime) | PLAY2-MICRO (1vCPU/2GB) | ~$4.00 |
+| Ionos VPS | N3 (runtime) | VPS XS (1vCPU/1GB) | ~$2.00 |
 | UpCloud | N4 (control) | DEV-1xCPU-2GB | ~$3.20 |
 | Cloudflare Pages | Frontend CDN | Free tier | $0 |
 | Let's Encrypt | TLS | Free | $0 |

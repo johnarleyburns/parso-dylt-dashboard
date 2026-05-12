@@ -9,6 +9,14 @@
 #   - SSH key pair at SSH_PRIVATE_KEY_PATH / SSH_PUBLIC_KEY_PATH (from .env)
 #   - wrangler installed: npm install -g wrangler
 #   - jq, curl, dig, ssh, scp in PATH
+#
+# N3 NOTE — Ionos VPS has no provisioning API.
+#   Before running this script, manually create a VPS at my.ionos.com, then set:
+#     IONOS_VPS_IP=<ip>            in infra/.env
+#     IONOS_VPS_PASSWORD=<pass>    in infra/.env  (root password, used only to install SSH key)
+#   up.sh will install the SSH key and run all bootstrap phases automatically.
+#   If IONOS_VPS_IP is already in .env and ionos.ip state file doesn't exist,
+#   this script writes it to infra/state/ionos.ip and proceeds.
 
 set -euo pipefail
 
@@ -23,10 +31,9 @@ step() { echo "  → $*" ; }
 die()  { echo "ERROR: $*" >&2 ; exit 1 ; }
 
 # Guard: abort if any .ip state files already exist (stale prior run).
-# The operator should run teardown-all.sh first, or pass --force to skip this check.
 FORCE="${1:-}"
 if [ "$FORCE" != "--force" ]; then
-  for f in hetzner linode scaleway upcloud; do
+  for f in hetzner linode ionos upcloud; do
     if [ -f "$SCRIPT_DIR/state/${f}.ip" ]; then
       die "infra/state/${f}.ip already exists — cluster may already be up.
   Run: ./infra/teardown/teardown-all.sh
@@ -37,7 +44,7 @@ fi
 
 # ─── Phase 1: Provision all four nodes ────────────────────────────────────────
 
-log "PHASE 1 — Provisioning nodes (parallel)"
+log "PHASE 1 — Provisioning nodes"
 
 step "Hetzner  (N1 — runtime, Ashburn VA)..."
 bash "$SCRIPT_DIR/provision/hetzner.sh" &
@@ -47,8 +54,11 @@ step "Linode   (N2 — runtime, Los Angeles CA)..."
 bash "$SCRIPT_DIR/provision/linode.sh" &
 PID_N2=$!
 
-step "Scaleway (N3 — runtime, Paris FR)..."
-bash "$SCRIPT_DIR/provision/scaleway.sh" &
+# N3 — Ionos VPS: no provisioning API; use IONOS_VPS_IP set in .env.
+step "Ionos    (N3 — runtime, Berlin DE) — manual VPS, bootstrapping from IONOS_VPS_IP..."
+IONOS_VPS_IP="${IONOS_VPS_IP:?N3 requires IONOS_VPS_IP in infra/.env — create VPS at my.ionos.com first}"
+IONOS_VPS_PASSWORD="${IONOS_VPS_PASSWORD:-}"
+bash "$SCRIPT_DIR/provision/ionos-bootstrap.sh" &
 PID_N3=$!
 
 step "UpCloud  (N4 — control, Chicago IL)..."
@@ -59,13 +69,13 @@ PID_N4=$!
 FAIL=0
 wait $PID_N1 || { echo "  ✗ Hetzner provision failed"  >&2 ; FAIL=1 ; }
 wait $PID_N2 || { echo "  ✗ Linode provision failed"   >&2 ; FAIL=1 ; }
-wait $PID_N3 || { echo "  ✗ Scaleway provision failed" >&2 ; FAIL=1 ; }
+wait $PID_N3 || { echo "  ✗ Ionos provision failed"    >&2 ; FAIL=1 ; }
 wait $PID_N4 || { echo "  ✗ UpCloud provision failed"  >&2 ; FAIL=1 ; }
 [ "$FAIL" -eq 0 ] || die "One or more provision scripts failed — see output above"
 
 N1_IP="$(cat "$SCRIPT_DIR/state/hetzner.ip")"
 N2_IP="$(cat "$SCRIPT_DIR/state/linode.ip")"
-N3_IP="$(cat "$SCRIPT_DIR/state/scaleway.ip")"
+N3_IP="$(cat "$SCRIPT_DIR/state/ionos.ip")"
 N4_IP="$(cat "$SCRIPT_DIR/state/upcloud.ip")"
 
 # Persist IPs to cluster.env so other scripts and operators can source them easily.
@@ -78,11 +88,11 @@ export N4_IP="$N4_IP"
 EOF
 
 echo ""
-echo "  Node IPs:"
-echo "    N1 (Hetzner)  $N1_IP"
-echo "    N2 (Linode)   $N2_IP"
-echo "    N3 (Scaleway) $N3_IP"
-echo "    N4 (UpCloud)  $N4_IP"
+  echo "  Node IPs:"
+  echo "    N1 (Hetzner)  $N1_IP"
+  echo "    N2 (Linode)   $N2_IP"
+  echo "    N3 (Ionos)    $N3_IP"
+  echo "    N4 (UpCloud)  $N4_IP"
 
 # Purge any stale known_hosts entries for the new IPs so later SSH/scp by IP
 # (in deploy-app.sh and deploy-dash.sh) don't fail on host key mismatch.
@@ -158,10 +168,11 @@ NODES_P4=("$N1_IP" "$N2_IP" "$N3_IP" "$N4_IP")
 for NODE_IP in "${NODES_P4[@]}"; do
   step "tls.sh on $NODE_IP..."
   # Use deploy + sudo (root SSH disabled by base.sh hardening)
+  # Runtime nodes need CLOUDFLARE_API_TOKEN for the DNS-01 challenge (api.<DOMAIN> SAN).
   ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o IdentitiesOnly=yes \
     -i "$SSH_PRIVATE_KEY_PATH" \
     "deploy@$NODE_IP" \
-    "ADMIN_EMAIL=$ADMIN_EMAIL sudo -E bash -s" \
+    "ADMIN_EMAIL=$ADMIN_EMAIL CLOUDFLARE_API_TOKEN=$CLOUDFLARE_API_TOKEN sudo -E bash -s" \
     < "$SCRIPT_DIR/bootstrap/tls.sh" &
   PIDS_P4+=($!)
 done

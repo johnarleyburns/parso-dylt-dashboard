@@ -29,7 +29,7 @@ echo "==> Building oilfield-scraper..."
 declare -A NODE_IPS
 NODE_IPS[n1]="$(cat "$REPO_ROOT/infra/state/hetzner.ip"  2>/dev/null || echo "")"
 NODE_IPS[n2]="$(cat "$REPO_ROOT/infra/state/linode.ip"   2>/dev/null || echo "")"
-NODE_IPS[n3]="$(cat "$REPO_ROOT/infra/state/scaleway.ip" 2>/dev/null || echo "")"
+NODE_IPS[n3]="$(cat "$REPO_ROOT/infra/state/ionos.ip"    2>/dev/null || echo "")"
 
 for NODE in "${NODES[@]}"; do
   NODE_IP="${NODE_IPS[$NODE]}"

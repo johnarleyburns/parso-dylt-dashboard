@@ -69,7 +69,7 @@ Chosen for: geographic diversity (no two nodes in the same region), no shared pa
 |---|------|----------|------|-------------|--------|-----------------|
 | **N1** | Runtime Node 1 | **Hetzner Cloud** | CX22 (2 vCPU, 4 GB RAM, 40 GB NVMe) | ~$4.15 | Ashburn, VA (**US East**) | Hetzner Cloud API |
 | **N2** | Runtime Node 2 | **Linode (Akamai)** | Cloud Server (1 vCPU, 2 GB RAM, 20 GB SSD) | ~$6.00 | Los Angeles, CA (**US West**) | Linode REST API |
-| **N3** | Runtime Node 3 | **Scaleway** | PLAY2-MICRO (1 vCPU, 2 GB RAM, 20 GB SSD) | ~$4.00 | Paris, FR (**Europe**) | Scaleway API v1 |
+| **N3** | Runtime Node 3 | **Ionos VPS** | VPS XS (1 vCPU, 1 GB RAM, 10 GB NVMe) | ~$2.00 | Berlin, DE (**Europe**) | Manual provisioning (my.ionos.com) |
 | **N4** | Control/Dashboard | **UpCloud** | Cloud Server DEV-1SA (1 vCPU, 1 GB RAM, 10 GB MaxIOPS SSD) | ~$3.25 | Chicago, IL (**US Central**) | UpCloud API v3 |
 | **CF** | Dashboard Frontend | **Cloudflare Pages** | Free tier (static React build) | $0 | Global CDN | CF Pages API |
 
@@ -81,7 +81,7 @@ Chosen for: geographic diversity (no two nodes in the same region), no shared pa
 |------|--------|-------------|
 | N1/Hetzner | US East (Ashburn, VA) | US East outage → N2 + N3 hold quorum |
 | N2/Linode | US West (Los Angeles, CA) | US West outage → N1 + N3 hold quorum |
-| N3/Scaleway | Europe (Paris, FR) | Europe outage → N1 + N2 hold quorum |
+| N3/Ionos | Europe (Berlin, DE) | Europe outage → N1 + N2 hold quorum |
 | N4/UpCloud | US Central (Chicago, IL) | Control node down → runtime unaffected |
 
 No two nodes share a failure zone. A US East + Europe simultaneous outage leaves N2 (US West) serving in degraded read-only mode. No provider parent company is shared across any two nodes.
@@ -148,7 +148,7 @@ oilfield/
 │   ├── provision/           # Per-provider provisioning scripts
 │   │   ├── hetzner.sh
 │   │   ├── ovhcloud.sh
-│   │   ├── scaleway.sh
+│   │   ├── ionos.sh
 │   │   └── upcloud.sh
 │   ├── bootstrap/           # Post-provision node bootstrap
 │   │   ├── base.sh          # OS hardening, user setup, firewall
@@ -207,7 +207,7 @@ oilfield/
            ┌───────────────────┼───────────────────┐
            ▼                   ▼                   ▼
     ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-    │  N1/Hetzner │    │ N2/Linode │    │  N3/Scaleway│
+    │  N1/Hetzner │    │ N2/Linode │    │  N3/Ionos  │
     │  US East    │    │  US West    │    │  Paris, EU  │
     │─────────────│    │─────────────│    │─────────────│
     │ etcd peer   │◄──►│ etcd peer   │◄──►│ etcd peer   │
@@ -261,7 +261,7 @@ oilfield/
 /oilfield/nodes/{name}/heartbeat        RFC3339 — written every 30s by scraper
 /oilfield/nodes/{name}/status           "ok" | "degraded" | "offline"
 /oilfield/nodes/{name}/ip               current public IP
-/oilfield/nodes/{name}/provider         "hetzner" | "linode" | "scaleway" | "upcloud"
+/oilfield/nodes/{name}/provider         "hetzner" | "linode" | "ionos" | "upcloud"
 /oilfield/config/scrape_interval        seconds (default "300")
 /oilfield/config/active_node            node currently holding scrape lock
 ```
@@ -347,7 +347,7 @@ These are the only steps a human must perform. Everything after Phase 0 is agent
 |----------|-----------------|
 | **Hetzner** | cloud.hetzner.com → Add payment → API Tokens → Create Read+Write → save as `HETZNER_API_TOKEN` |
 | **Linode (Akamai)** | cloud.linode.com → Sign up → API Tokens → Create Token (Linodes: Read/Write) → save as `LINODE_TOKEN` |
-| **Scaleway** | scaleway.com → Add payment → IAM → API Keys → Generate key → save as `SCW_ACCESS_KEY` + `SCW_SECRET_KEY`; copy Project ID as `SCW_PROJECT_ID` |
+| **Ionos** | my.ionos.com → Create VPS → note root password and IP → set `IONOS_VPS_IP` and `IONOS_VPS_PASSWORD` in `.env` |
 | **UpCloud** | upcloud.com → Add payment → API Tokens → Create token → name it `oilfield-deploy` → save token value as `UPCLOUD_API_TOKEN` |
 | **EIA** | eia.gov/opendata → Register (free, email required) → save as `EIA_API_KEY` |
 | **Cloudflare Pages** | Already in Cloudflare — Pages → Create project → name it `oilfield-dash` → add custom domain `dash.oilfield.parso.guru` (CF manages CNAME automatically) |
@@ -371,10 +371,8 @@ ssh-keygen -t ed25519 -C "oilfield-deploy" -f ~/.ssh/oilfield_ed25519
 HETZNER_API_TOKEN=
 LINODE_TOKEN=
 
-SCW_ACCESS_KEY=
-SCW_SECRET_KEY=
-SCW_PROJECT_ID=
-SCW_ZONE=fr-par-1
+IONOS_VPS_IP=
+IONOS_VPS_PASSWORD=
 UPCLOUD_API_TOKEN=
 UPCLOUD_ZONE=us-chi1
 EIA_API_KEY=
@@ -419,7 +417,7 @@ Constraints: bash 5+, curl, jq. Daylight principle: simplest possible solution.
 
 > **N2 uses Linode (Akamai Cloud):** Clean REST API — POST /linode/instances with region, type, image, authorized_keys. Region: us-lax (Los Angeles). Type: g6-standard-1 (1 vCPU, 2GB, 50GB).
 
-> **Note on Scaleway provisioning:** Scaleway's API is straightforward — Bearer token auth, clean REST endpoints at `api.scaleway.com/instance/v1`. The `scaleway.sh` script will be similar in complexity to `hetzner.sh`.
+> **Note on Ionos N3 provisioning:** Ionos VPS (ionos.com/servers/vps) has no programmatic provisioning API. N3 must be created manually at my.ionos.com. Set `IONOS_VPS_IP` and `IONOS_VPS_PASSWORD` in `.env`, then `up.sh` will install the SSH key and run all bootstrap scripts automatically.
 
 > **Note on UpCloud provisioning:** UpCloud API v3 uses HTTP Basic Authentication (`UPCLOUD_USERNAME:UPCLOUD_PASSWORD`). Clean REST endpoints at `api.upcloud.com/1.3`. Comparable in complexity to `hetzner.sh`. SSH key upload and server creation are single POST requests.
 
@@ -651,7 +649,7 @@ OILFIELD CLUSTER STATUS  [2026-04-22 14:32:01 UTC]
 NODE   PROVIDER    STATUS  HEARTBEAT    SCRAPE LOCK
 n1     Hetzner     ● OK    12s ago      —
 n2     Linode    ● OK    18s ago      HELD (23s)   ← currently scraping
-n3     Scaleway    ● OK     9s ago      —
+n3     Ionos       ● OK     9s ago      —
 
 ETCD     Leader: n2 (Linode)    Members: 3/3 healthy
 
@@ -787,7 +785,7 @@ oilfield/
 
 **Section 4: What the Agent Got Right** — All four provision scripts (nearly verbatim), all systemd unit files, nginx config, EIA API v2 client, RSS news parser, etcd client helpers (once given the correct lease pattern), CLI dashboard table layout.
 
-**Section 5: The Numbers** — $17.40/month vs. $240/month. 4-node, 4-provider infrastructure across 4 geographic regions (Hetzner/US-East, Linode/US-West, Scaleway/Europe, UpCloud/US-Central) plus Cloudflare Pages CDN at $0. No two nodes share a failure zone. Full energy market coverage. Any two runtime nodes can fail. Dashboard frontend served globally from Cloudflare edge — zero origin load for static assets. Zero vendor lock-in. The Daylight thesis proven numerically.
+**Section 5: The Numbers** — $15.40/month vs. $240/month. 4-node, 4-provider infrastructure across 4 geographic regions (Hetzner/US-East, Linode/US-West, Ionos/Europe, UpCloud/US-Central) plus Cloudflare Pages CDN at $0. No two nodes share a failure zone. Full energy market coverage. Any two runtime nodes can fail. Dashboard frontend served globally from Cloudflare edge — zero origin load for static assets. Zero vendor lock-in. The Daylight thesis proven numerically.
 
 ---
 
@@ -795,7 +793,7 @@ oilfield/
 
 | ID | Phase | Step | Time |
 |----|-------|------|------|
-| MANUAL-1 | Phase 0 | Create accounts + billing (Hetzner, Linode, Scaleway, UpCloud + EIA) | 45–90 min |
+| MANUAL-1 | Phase 0 | Create accounts + billing (Hetzner, Linode, Ionos, UpCloud + EIA) | 45–90 min |
 | MANUAL-2 | Phase 0 | Generate SSH keypair | 2 min |
 | MANUAL-3 | Phase 0 | Cloudflare API token + Zone ID (nameservers already transferred) | 5 min |
 | MANUAL-3b | Phase 0 | Create Cloudflare Pages project `oilfield-dash`, add custom domain `dash.oilfield.parso.guru` | 5 min |
@@ -816,7 +814,7 @@ oilfield/
 |------|----------|------|---------|
 | N1 — Runtime | Hetzner CX22 | 2 vCPU / 4 GB / 40 GB NVMe | ~$4.15 |
 | N2 — Runtime | Linode g6-standard-1 | 1 vCPU / 2 GB / 50 GB SSD | ~$12.00 |
-| N3 — Runtime | Scaleway PLAY2-MICRO | 1 vCPU / 2 GB / 20 GB SSD | ~$4.00 |
+| N3 — Runtime | Ionos VPS XS | 1 vCPU / 1 GB / 10 GB NVMe | ~$2.00 |
 | N4 — Control | UpCloud DEV-1SA | 1 vCPU / 1 GB / 10 GB MaxIOPS SSD | ~$3.25 |
 | Dashboard Frontend | Cloudflare Pages | Global CDN, static React build | $0 |
 | DNS | Cloudflare | Free tier | $0 |
@@ -906,7 +904,7 @@ base.sh is called automatically by each provision script. After all four IPs exi
 # daylight.sh requires all 3 runtime IPs — run after all provision scripts complete
 N1_IP=$(cat infra/state/hetzner.ip)
 N2_IP=$(cat infra/state/linode.ip)
-N3_IP=$(cat infra/state/scaleway.ip)
+N3_IP=$(cat infra/state/ionos.ip)
 
 for IP in $N1_IP $N2_IP $N3_IP; do
   ssh -i ~/.ssh/oilfield_ed25519 deploy@$IP \

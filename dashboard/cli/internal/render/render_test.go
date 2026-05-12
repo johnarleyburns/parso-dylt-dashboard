@@ -32,7 +32,7 @@ func TestNodes_ContainsNodeNames(t *testing.T) {
 	cluster := makeCluster("n1", map[string]*client.NodeStatus{
 		"n1": {Provider: "hetzner", Status: "ok", Heartbeat: time.Now().UTC().Format(time.RFC3339)},
 		"n2": {Provider: "kamatera", Status: "ok"},
-		"n3": {Provider: "scaleway", Status: "ok"},
+		"n3": {Provider: "ionos", Status: "ok"},
 	})
 	healths := makeHealths(map[string]string{"n1": "ok", "n2": "ok", "n3": "ok"})
 
@@ -46,7 +46,7 @@ func TestNodes_ContainsNodeNames(t *testing.T) {
 
 func TestNodes_ShowsScrapeLockHolder(t *testing.T) {
 	cluster := makeCluster("n2", map[string]*client.NodeStatus{
-		"n1": {Provider: "hetzner"}, "n2": {Provider: "kamatera"}, "n3": {Provider: "scaleway"},
+		"n1": {Provider: "hetzner"}, "n2": {Provider: "kamatera"}, "n3": {Provider: "ionos"},
 	})
 	out := render.Nodes(cluster, makeHealths(map[string]string{"n1": "ok", "n2": "ok", "n3": "ok"}))
 
@@ -65,7 +65,7 @@ func TestNodes_ShowsScrapeLockHolder(t *testing.T) {
 
 func TestNodes_OfflineNode(t *testing.T) {
 	cluster := makeCluster("", map[string]*client.NodeStatus{
-		"n1": {Provider: "hetzner"}, "n2": {Provider: "kamatera"}, "n3": {Provider: "scaleway"},
+		"n1": {Provider: "hetzner"}, "n2": {Provider: "kamatera"}, "n3": {Provider: "ionos"},
 	})
 	healths := makeHealths(map[string]string{"n1": "ok", "n2": "offline", "n3": "ok"})
 	out := render.Nodes(cluster, healths)
@@ -178,7 +178,7 @@ func TestNews_EmptyShowsMessage(t *testing.T) {
 
 func TestStatus_ContainsTimestamp(t *testing.T) {
 	cluster := makeCluster("", map[string]*client.NodeStatus{
-		"n1": {Provider: "hetzner"}, "n2": {Provider: "kamatera"}, "n3": {Provider: "scaleway"},
+		"n1": {Provider: "hetzner"}, "n2": {Provider: "kamatera"}, "n3": {Provider: "ionos"},
 	})
 	healths := makeHealths(map[string]string{"n1": "ok", "n2": "ok", "n3": "ok"})
 	out := render.Status(cluster, healths)

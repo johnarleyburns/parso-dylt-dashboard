@@ -8,8 +8,7 @@ const DESKTOP_COLUMNS: string[][] = [
 ]
 
 const MOBILE_COLUMNS: string[][] = [
-  ['crude', 'natgas', 'lng', 'ngls'],
-  ['lpg', 'refined', 'coal', 'carbon', 'electricity'],
+  ['crude', 'natgas', 'lng', 'ngls', 'lpg', 'refined', 'coal', 'carbon', 'electricity'],
 ]
 
 const SECTOR_LABELS: Record<string, string> = {

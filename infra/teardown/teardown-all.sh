@@ -7,8 +7,8 @@
 #
 # What this does:
 #   1. Deletes oilfield-n1 from Hetzner Cloud
-#   2. Deletes oilfield-n2 from Kamatera
-#   3. Deletes oilfield-n3 from Scaleway
+#   2. Deletes oilfield-n2 from Linode/Akamai
+#   3. Deletes oilfield-n3 from Ionos Cloud (server + VDC + IP block)
 #   4. Deletes oilfield-n4 from UpCloud
 #   5. Removes infra/state/*.ip files
 #   6. Optionally: removes Cloudflare DNS A records (controlled by REMOVE_DNS=1)
@@ -35,10 +35,14 @@ ok()   { echo "  ✓  $*" ; }
 if [ "$YES" != "--yes" ]; then
   echo ""
   echo "  This will DELETE all four oilfield VMs:"
-  echo "    Hetzner  oilfield-n1"
-  echo "    Linode   oilfield-n2"
-  echo "    Scaleway oilfield-n3"
-  echo "    UpCloud  oilfield-n4"
+  echo "    Hetzner  oilfield-n1  (API)"
+  echo "    Linode   oilfield-n2  (API)"
+  echo "    Ionos    oilfield-n3  (MANUAL — you must delete at my.ionos.com)"
+  echo "    UpCloud  oilfield-n4  (API)"
+  echo ""
+  echo "  NOTE: N3 (Ionos VPS) has no API — this script will remove it from DNS"
+  echo "  and clean up state files, but you must manually delete the VPS at"
+  echo "  my.ionos.com to stop billing."
   echo ""
   read -rp "  Type 'yes' to confirm: " CONFIRM
   [ "$CONFIRM" = "yes" ] || { echo "  Aborted."; exit 0; }
@@ -82,31 +86,21 @@ else
   warn "oilfield-n2 not found in Linode (already deleted?)"
 fi
 
-# ─── Scaleway: delete oilfield-n3 ─────────────────────────────────────────────
+# ─── Ionos VPS: oilfield-n3 ───────────────────────────────────────────────────
+#
+# NOTE: Ionos consumer VPS has no provisioning API — it cannot be deleted
+# programmatically. This section cleans up DNS and local state files only.
+# YOU MUST manually delete the VPS at https://my.ionos.com to stop billing.
 
-log "Scaleway — deleting oilfield-n3"
+log "Ionos VPS — oilfield-n3 (manual deletion required)"
 
-BASE_URL="https://api.scaleway.com/instance/v1/zones/$SCW_ZONE"
-AUTH_HEADER_SCW="X-Auth-Token: $SCW_SECRET_KEY"
-
-SERVER_ID=$(curl -s \
-  -H "$AUTH_HEADER_SCW" \
-  "$BASE_URL/servers?name=oilfield-n3" \
-  | jq -r '.servers[0].id // empty')
-
-if [ -n "$SERVER_ID" ]; then
-  step "Found server id=$SERVER_ID — powering off then deleting..."
-
-  # Terminate (power off + delete) via action
-  curl -s -X POST \
-    -H "$AUTH_HEADER_SCW" \
-    -H "Content-Type: application/json" \
-    -d '{"action":"terminate"}' \
-    "$BASE_URL/servers/$SERVER_ID/action" | jq -r '.task.status' || true
-
-  ok "oilfield-n3 terminate action sent (Scaleway will handle volume cleanup)"
+N3_IP="${IONOS_VPS_IP:-$(cat "$INFRA_DIR/state/ionos.ip" 2>/dev/null || true)}"
+if [ -n "$N3_IP" ]; then
+  warn "Cannot delete Ionos VPS via API — please delete it manually at my.ionos.com"
+  warn "VPS IP was: $N3_IP"
+  ok "State files will be removed below; DNS will be cleaned up if REMOVE_DNS=1"
 else
-  warn "oilfield-n3 not found in Scaleway (already deleted?)"
+  warn "No Ionos VPS IP found in state — nothing to do for N3"
 fi
 
 # ─── UpCloud: delete oilfield-n4 ──────────────────────────────────────────────
@@ -199,7 +193,7 @@ fi
 log "Cleaning up state files"
 rm -f "$INFRA_DIR/state/hetzner.ip" \
        "$INFRA_DIR/state/linode.ip" \
-       "$INFRA_DIR/state/scaleway.ip" \
+       "$INFRA_DIR/state/ionos.ip" \
        "$INFRA_DIR/state/upcloud.ip" \
        "$INFRA_DIR/state/cluster.env"
 ok "infra/state/*.ip and cluster.env removed"
