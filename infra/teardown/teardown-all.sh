@@ -125,9 +125,17 @@ SERVER_UUID=$(curl -s \
   | head -1)
 
 if [ -n "$SERVER_UUID" ]; then
-  step "Found server uuid=$SERVER_UUID — stopping then deleting..."
+  step "Found server uuid=$SERVER_UUID — querying storage, then stopping and deleting..."
 
-  # Stop server first (required before delete)
+  # Query attached storage BEFORE stopping/deleting the server (server detail API
+  # returns empty storage_devices once the server is deleted).
+  STORAGE_UUIDS=$(curl -s \
+    -H "$AUTH_HEADER_UC" \
+    -H "Accept: application/json" \
+    "$BASE_URL_UC/server/$SERVER_UUID" \
+    | jq -r '.server.storage_devices.storage_device[].uuid // empty')
+
+  # Stop server first (required before delete on UpCloud)
   curl -s -X POST \
     -H "$AUTH_HEADER_UC" \
     -H "Content-Type: application/json" \
@@ -135,22 +143,18 @@ if [ -n "$SERVER_UUID" ]; then
     -d '{"stop_server":{"stop_type":"hard","timeout":10}}' \
     "$BASE_URL_UC/server/$SERVER_UUID/stop" > /dev/null || true
 
-  step "Waiting 15s for server to stop..."
-  sleep 15
+  step "Waiting 20s for server to stop..."
+  sleep 20
 
-  # Delete server (storage is deleted separately — query and delete attached storage)
-  STORAGE_UUIDS=$(curl -s \
-    -H "$AUTH_HEADER_UC" \
-    -H "Accept: application/json" \
-    "$BASE_URL_UC/server/$SERVER_UUID" \
-    | jq -r '.server.storage_devices.storage_device[].uuid // empty')
-
+  # Delete server
   curl -s -X DELETE \
     -H "$AUTH_HEADER_UC" \
     -H "Accept: application/json" \
     "$BASE_URL_UC/server/$SERVER_UUID" > /dev/null || true
   ok "oilfield-n4 deleted"
 
+  # Delete attached storage volumes (must happen after server is deleted)
+  sleep 3
   for UUID in $STORAGE_UUIDS; do
     step "Deleting storage $UUID..."
     curl -s -X DELETE \
@@ -196,8 +200,21 @@ log "Cleaning up state files"
 rm -f "$INFRA_DIR/state/hetzner.ip" \
        "$INFRA_DIR/state/linode.ip" \
        "$INFRA_DIR/state/scaleway.ip" \
-       "$INFRA_DIR/state/upcloud.ip"
-ok "infra/state/*.ip removed"
+       "$INFRA_DIR/state/upcloud.ip" \
+       "$INFRA_DIR/state/cluster.env"
+ok "infra/state/*.ip and cluster.env removed"
+
+# Remove stale SSH known_hosts entries for all cluster hostnames and any IPs
+# recorded in cluster.env before we deleted it.  Silently skips if not present.
+log "Purging stale SSH known_hosts entries"
+source "$INFRA_DIR/.env"
+for host in \
+    "$DOMAIN" \
+    "n1.$DOMAIN" "n2.$DOMAIN" "n3.$DOMAIN" \
+    "ctrl.$DOMAIN" "etcd.$DOMAIN" "api.$DOMAIN"; do
+  ssh-keygen -R "$host" 2>/dev/null || true
+done
+ok "known_hosts entries removed (IPs purged by up.sh on next run)"
 
 # ─── Done ─────────────────────────────────────────────────────────────────────
 

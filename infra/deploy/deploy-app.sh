@@ -25,8 +25,16 @@ echo "==> Building oilfield-api..."
 echo "==> Building oilfield-scraper..."
 (cd "$REPO_ROOT/app/backend" && GOARCH=amd64 GOOS=linux go build -o /tmp/oilfield-scraper ./cmd/scraper)
 
+# Load IPs from state files — use IPs directly to avoid DNS propagation race.
+declare -A NODE_IPS
+NODE_IPS[n1]="$(cat "$REPO_ROOT/infra/state/hetzner.ip"  2>/dev/null || echo "")"
+NODE_IPS[n2]="$(cat "$REPO_ROOT/infra/state/linode.ip"   2>/dev/null || echo "")"
+NODE_IPS[n3]="$(cat "$REPO_ROOT/infra/state/scaleway.ip" 2>/dev/null || echo "")"
+
 for NODE in "${NODES[@]}"; do
-  HOST="deploy@${NODE}.${DOMAIN}"
+  NODE_IP="${NODE_IPS[$NODE]}"
+  [ -n "$NODE_IP" ] || { echo "  WARN: No IP found for $NODE — skipping" >&2; continue; }
+  HOST="deploy@$NODE_IP"
   echo ""
   echo "==> Deploying to $NODE ($HOST)..."
 
@@ -40,9 +48,14 @@ for NODE in "${NODES[@]}"; do
     sudo mv /tmp/oilfield-api /opt/oilfield/bin/oilfield-api
     sudo mv /tmp/oilfield-scraper /opt/oilfield/bin/oilfield-scraper
     sudo chmod +x /opt/oilfield/bin/oilfield-api /opt/oilfield/bin/oilfield-scraper
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now oilfield-api
     sudo systemctl restart oilfield-api
-    # scraper is a oneshot timer — no restart needed; next timer tick picks up the new binary
-    echo "  oilfield-api restarted on $(hostname)"
+    # Enable + start the scraper timer (idempotent)
+    sudo systemctl enable --now oilfield-scraper.timer
+    # Run the scraper immediately to populate etcd without waiting 60s for the timer
+    sudo systemctl start oilfield-scraper.service || true
+    echo "  oilfield-api restarted and scraper timer enabled on $(hostname)"
 REMOTE
 
   echo "  $NODE done."
