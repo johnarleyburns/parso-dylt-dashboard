@@ -43,18 +43,18 @@ Data covers nine sectors: crude oil, natural gas, LNG, LPG, NGLs, electricity, r
 ## Cluster Architecture
 
 ```
-                ┌──────────────────────────────────────────────────┐
+                ┌────────────────────────────────────────────────-──┐
                 │  Cloudflare DNS — parso.guru zone                 │
-                │  oilfield.parso.guru  →  N1, N2, N3 (round-robin)│
+                │  oilfield.parso.guru  →  N1, N2, N3 (round-robin) │
                 │  n1/n2/n3.oilfield.parso.guru  →  per-node        │
                 │  ctrl.oilfield.parso.guru  →  N4                  │
                 │  oilfield-dash.parso.guru  →  CF Pages (CNAME)    │
-                └──────────────────────────────────────────────────┘
+                └──────────────────────────────────────────────────-┘
 
-  ┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────────┐
-  │ N1 — Hetzner Cloud   │  │ N2 — Linode/Akamai  │  │ N3 — Ionos VPS      │
+  ┌────────────────────-─┐  ┌────────────────────-─┐  ┌─────────────────────┐
+  │ N1 — Hetzner Cloud   │  │ N2 — Linode/Akamai   │  │ N3 — Ionos VPS      │
   │ Ashburn, VA (US East)│  │ Los Angeles (US West)│  │ Berlin, DE (Europe) │
-  │ cpx11: 2vCPU 4GB RAM │  │ g6-std-1: 1vCPU 2GB │  │ VPS XS: 1vCPU 1GB   │
+  │ cpx11: 2vCPU 4GB RAM │  │ g6-std-1: 1vCPU 2GB  │  │ VPS XS: 1vCPU 1GB   │
   │ ~$4.20/mo            │  │ ~$6.00/mo            │  │ ~$2.00/mo           │
   │                      │  │                      │  │                     │
   │  etcd (peer member)  │  │  etcd (peer member)  │  │  etcd (peer member) │
@@ -65,7 +65,7 @@ Data covers nine sectors: crude oil, natural gas, LNG, LPG, NGLs, electricity, r
              │  etcd cluster (2379 client / 2380 peer, WAN-tuned)  │
              └──────────────────────────┬──────────────────────────┘
 
-                          ┌─────────────────────┐
+                          ┌─────────────────--────┐
                           │ N4 — UpCloud          │
                           │ Chicago, IL (US Ctrl) │
                           │ DEV-1xCPU-2GB         │
@@ -74,13 +74,13 @@ Data covers nine sectors: crude oil, natural gas, LNG, LPG, NGLs, electricity, r
                           │  oilfield-dash-web    │
                           │  :8090 (Go backend)   │
                           │  nginx + TLS (443)    │
-                          └─────────────────────┘
+                          └───────────────────--──┘
 
-  ┌─────────────────────────────────────┐
+  ┌───────────────────────────-──────────┐
   │  Cloudflare Pages (free tier)        │
   │  React frontend → oilfield-dash-web  │
   │  CORS-gated to ctrl.oilfield...guru  │
-  └─────────────────────────────────────┘
+  └────────────────────────────-─────────┘
 ```
 
 ### Node roles
