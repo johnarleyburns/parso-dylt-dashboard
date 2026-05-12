@@ -332,7 +332,7 @@ export default function DailyPricesBoard({ prices, visibleSectors, mobile = fals
         </span>
       </div>
 
-      {/* Column grid: 3 cols desktop, 2 cols mobile */}
+      {/* Column grid: 3 cols desktop, 1 col mobile (full-width, vertically scrollable) */}
       <div style={{ flex: 1, overflow: 'auto', padding: '0.65rem', display: 'flex', gap: '0.65rem', alignItems: 'flex-start' }}>
         {COLUMNS.map((colSectors, colIdx) => (
           <div key={colIdx} style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.65rem', minWidth: 0 }}>
