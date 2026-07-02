@@ -26,6 +26,18 @@ export interface NewsResponse {
   items: NewsItem[]
 }
 
+export interface HistoryPoint {
+  price: number
+  scraped_at: string
+}
+
+export interface HistoryResponse {
+  sector: string
+  symbol: string
+  days: number
+  points: HistoryPoint[]
+}
+
 export interface NodeHealth {
   node: string
   provider: string

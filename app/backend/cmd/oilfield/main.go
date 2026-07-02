@@ -49,6 +49,8 @@ func main() {
 	oilKey := os.Getenv("OILPRICE_API_KEY")
 	interval := time.Duration(atoiOr(os.Getenv("SCRAPE_INTERVAL"), 300)) * time.Second
 	concurrency := atoiOr(os.Getenv("SCRAPE_CONCURRENCY"), 3)
+	histInterval := time.Duration(atoiOr(os.Getenv("HISTORY_MIN_INTERVAL"), 3600)) * time.Second
+	histRetention := time.Duration(atoiOr(os.Getenv("HISTORY_RETENTION_DAYS"), 90)) * 24 * time.Hour
 
 	st, err := store.New(dbPath)
 	if err != nil {
@@ -57,10 +59,12 @@ func main() {
 	defer st.Close()
 
 	scrapeCfg := scrapejob.Config{
-		NodeName:    nodeName,
-		EIAKey:      eiaKey,
-		OilPriceKey: oilKey,
-		Concurrency: concurrency,
+		NodeName:           nodeName,
+		EIAKey:             eiaKey,
+		OilPriceKey:        oilKey,
+		Concurrency:        concurrency,
+		HistoryMinInterval: histInterval,
+		HistoryRetention:   histRetention,
 	}
 
 	if *scrapeOnce {

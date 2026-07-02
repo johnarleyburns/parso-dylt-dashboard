@@ -6,12 +6,13 @@ import type { AllPrices, PricePoint } from '../types'
 interface PriceTableProps {
   prices: AllPrices
   visibleSectors: Set<string>
+  onRowClick?: (sector: string, symbol: string) => void
 }
 
 type SortKey = keyof PricePoint
 type SortDir = 'asc' | 'desc'
 
-export default function PriceTable({ prices, visibleSectors }: PriceTableProps) {
+export default function PriceTable({ prices, visibleSectors, onRowClick }: PriceTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>('name')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [filterText, setFilterText] = useState('')
@@ -192,7 +193,8 @@ export default function PriceTable({ prices, visibleSectors }: PriceTableProps) 
               {sorted.map((p, i) => (
                 <tr
                   key={i}
-                  style={{ background: i % 2 === 0 ? 'transparent' : '#0f172a22' }}
+                  onClick={onRowClick ? () => onRowClick(p.sector, p.symbol) : undefined}
+                  style={{ background: i % 2 === 0 ? 'transparent' : '#0f172a22', cursor: onRowClick ? 'pointer' : 'default' }}
                 >
                   <td style={{ ...tdStyle, color: '#e2e8f0', fontWeight: 600 }}>{p.symbol}</td>
                   <td style={tdStyle}>{p.name}</td>

@@ -19,6 +19,7 @@ import NewsPanel from './components/NewsPanel'
 import NodeHealthGrid from './components/NodeHealthGrid'
 import AdminPanel from './components/AdminPanel'
 import AdminConsole from './components/AdminConsole'
+import PriceHistoryModal from './components/PriceHistoryModal'
 import type { AllPrices, NewsResponse, AllHealth, NodeHealth } from './types'
 
 type ViewMode = 'prices' | '3d' | '2d' | 'table'
@@ -120,6 +121,12 @@ export default function App() {
   const [visibleSectors, setVisibleSectors] = useState<Set<string>>(new Set(ALL_SECTORS))
   const [viewMode, setViewMode] = useState<ViewMode>('prices')
   const [showConsole, setShowConsole] = useState(false)
+  const [historyTarget, setHistoryTarget] = useState<{ sector: string; symbol: string; name?: string; unit?: string } | null>(null)
+
+  const openHistory = useCallback((sector: string, symbol: string) => {
+    const match = (prices[sector] ?? []).find((p) => p.symbol === symbol)
+    setHistoryTarget({ sector, symbol, name: match?.name, unit: match?.unit })
+  }, [prices])
 
   const mobile = useMobile()
   const landscape = useLandscape()
@@ -403,7 +410,7 @@ export default function App() {
           minHeight: 0,
         }}>
           {viewMode === 'prices' && (
-            <DailyPricesBoard prices={prices} visibleSectors={visibleSectors} mobile={mobile} />
+            <DailyPricesBoard prices={prices} visibleSectors={visibleSectors} mobile={mobile} onRowClick={openHistory} />
           )}
           {viewMode === '3d' && (
             <EnergyCurve3D prices={prices} visibleSectors={visibleSectors} />
@@ -412,7 +419,7 @@ export default function App() {
             <PriceChart2D prices={prices} visibleSectors={visibleSectors} />
           )}
           {viewMode === 'table' && (
-            <PriceTable prices={prices} visibleSectors={visibleSectors} />
+            <PriceTable prices={prices} visibleSectors={visibleSectors} onRowClick={openHistory} />
           )}
         </div>
 
@@ -450,6 +457,17 @@ export default function App() {
       {/* ---- Daylight Control Console overlay ---- */}
       {showConsole && (
         <AdminConsole onClose={() => setShowConsole(false)} mobile={mobile} />
+      )}
+
+      {/* ---- Price history overlay ---- */}
+      {historyTarget && (
+        <PriceHistoryModal
+          sector={historyTarget.sector}
+          symbol={historyTarget.symbol}
+          name={historyTarget.name}
+          unit={historyTarget.unit}
+          onClose={() => setHistoryTarget(null)}
+        />
       )}
     </div>
   )

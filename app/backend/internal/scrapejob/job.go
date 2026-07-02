@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"oilfield/internal/scraper"
+	"oilfield/internal/store"
 )
 
 // Store is the write surface the scrape job needs.
@@ -21,6 +22,8 @@ type Store interface {
 	Put(ctx context.Context, key, value string) error
 	PutJSON(ctx context.Context, key string, v any) error
 	GetJSON(ctx context.Context, key string, dest any) error
+	RecordHistory(ctx context.Context, samples []store.HistorySample, minInterval time.Duration) error
+	PruneHistory(ctx context.Context, before time.Time) error
 }
 
 type Config struct {
@@ -28,6 +31,9 @@ type Config struct {
 	EIAKey      string
 	OilPriceKey string
 	Concurrency int // max concurrent source fetches (default 3)
+
+	HistoryMinInterval time.Duration // min gap between identical history samples (default 1h)
+	HistoryRetention   time.Duration // how long to keep history (default 90 days)
 }
 
 type Result struct {
@@ -45,6 +51,14 @@ func Run(ctx context.Context, st Store, cfg Config) Result {
 	conc := cfg.Concurrency
 	if conc < 1 {
 		conc = 3
+	}
+	histInterval := cfg.HistoryMinInterval
+	if histInterval <= 0 {
+		histInterval = time.Hour
+	}
+	histRetention := cfg.HistoryRetention
+	if histRetention <= 0 {
+		histRetention = 90 * 24 * time.Hour
 	}
 	sem := make(chan struct{}, conc)
 
@@ -197,6 +211,37 @@ func Run(ctx context.Context, st Store, cfg Config) Result {
 		}
 	}
 
+	// Append the front/spot price of each product to the history time series.
+	var samples []store.HistorySample
+	for sector, points := range sectorPrices {
+		bySymbol := make(map[string][]scraper.PricePoint)
+		for _, p := range points {
+			bySymbol[p.Symbol] = append(bySymbol[p.Symbol], p)
+		}
+		for symbol, pts := range bySymbol {
+			fp := frontPoint(pts)
+			if fp.Price <= 0 {
+				continue
+			}
+			at := fp.ScrapedAt
+			if at.IsZero() {
+				at = time.Now().UTC()
+			}
+			samples = append(samples, store.HistorySample{
+				Sector: sector, Symbol: symbol, Name: fp.Name,
+				Unit: fp.Unit, Price: fp.Price, ScrapedAt: at,
+			})
+		}
+	}
+	if len(samples) > 0 {
+		if err := st.RecordHistory(ctx, samples, histInterval); err != nil {
+			log.Printf("[%s] history write error: %v", node, err)
+		}
+		if err := st.PruneHistory(ctx, time.Now().Add(-histRetention)); err != nil {
+			log.Printf("[%s] history prune error: %v", node, err)
+		}
+	}
+
 	newsMu.Lock()
 	newCount := 0
 	for source, items := range newsResults {
@@ -211,4 +256,30 @@ func Run(ctx context.Context, st Store, cfg Config) Result {
 	log.Printf("[%s] scrape complete — %d price points, %d news items written", node, total, newCount)
 
 	return Result{PricePoints: total, NewsItems: newCount}
+}
+
+// frontPoint picks the representative price for a product's history series:
+// the spot price if present, otherwise the nearest (earliest) delivery month.
+func frontPoint(pts []scraper.PricePoint) scraper.PricePoint {
+	var best scraper.PricePoint
+	found := false
+	for _, p := range pts {
+		if p.Price <= 0 {
+			continue
+		}
+		if p.DeliveryMonth == "spot" {
+			return p
+		}
+		if !found || p.DeliveryMonth < best.DeliveryMonth {
+			best = p
+			found = true
+		}
+	}
+	if found {
+		return best
+	}
+	if len(pts) > 0 {
+		return pts[0]
+	}
+	return scraper.PricePoint{}
 }

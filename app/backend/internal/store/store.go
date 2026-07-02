@@ -104,6 +104,92 @@ func (s *Store) GetWithPrefix(ctx context.Context, prefix string) (map[string]st
 	return m, rows.Err()
 }
 
+// HistorySample is one observation of a product's front/spot price.
+type HistorySample struct {
+	Sector    string
+	Symbol    string
+	Name      string
+	Unit      string
+	Price     float64
+	ScrapedAt time.Time
+}
+
+// HistoryPoint is a single time-series datum returned to the API.
+type HistoryPoint struct {
+	Price     float64   `json:"price"`
+	ScrapedAt time.Time `json:"scraped_at"`
+}
+
+// RecordHistory appends samples to price_history, skipping a sample when the last
+// stored value for that (sector,symbol) is identical AND newer than minInterval —
+// this keeps flat series compact while still capturing every price change.
+func (s *Store) RecordHistory(ctx context.Context, samples []HistorySample, minInterval time.Duration) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, smp := range samples {
+		if smp.Symbol == "" || smp.Price <= 0 {
+			continue
+		}
+		var lastPrice float64
+		var lastAt string
+		row := tx.QueryRowContext(ctx,
+			"SELECT price, scraped_at FROM price_history WHERE sector=? AND symbol=? ORDER BY scraped_at DESC LIMIT 1",
+			smp.Sector, smp.Symbol)
+		switch err := row.Scan(&lastPrice, &lastAt); err {
+		case nil:
+			unchanged := lastPrice == smp.Price
+			if unchanged {
+				if t, perr := time.Parse(time.RFC3339, lastAt); perr == nil && smp.ScrapedAt.Sub(t) < minInterval {
+					continue // unchanged and too soon — skip
+				}
+			}
+		case sql.ErrNoRows:
+			// first observation — always insert
+		default:
+			return err
+		}
+		if _, err := tx.ExecContext(ctx,
+			"INSERT INTO price_history (sector, symbol, name, price, unit, scraped_at) VALUES (?, ?, ?, ?, ?, ?)",
+			smp.Sector, smp.Symbol, smp.Name, smp.Price, smp.Unit, smp.ScrapedAt.UTC().Format(time.RFC3339)); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// GetHistory returns the price series for one product since the given time, ascending.
+func (s *Store) GetHistory(ctx context.Context, sector, symbol string, since time.Time) ([]HistoryPoint, error) {
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT price, scraped_at FROM price_history WHERE sector=? AND symbol=? AND scraped_at >= ? ORDER BY scraped_at ASC",
+		sector, symbol, since.UTC().Format(time.RFC3339))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []HistoryPoint
+	for rows.Next() {
+		var p float64
+		var at string
+		if err := rows.Scan(&p, &at); err != nil {
+			return nil, err
+		}
+		t, _ := time.Parse(time.RFC3339, at)
+		out = append(out, HistoryPoint{Price: p, ScrapedAt: t})
+	}
+	return out, rows.Err()
+}
+
+// PruneHistory deletes samples older than the cutoff (retention window).
+func (s *Store) PruneHistory(ctx context.Context, before time.Time) error {
+	_, err := s.db.ExecContext(ctx, "DELETE FROM price_history WHERE scraped_at < ?", before.UTC().Format(time.RFC3339))
+	return err
+}
+
 // IsHealthy reports whether the database is reachable.
 func (s *Store) IsHealthy(ctx context.Context) bool {
 	tctx, cancel := context.WithTimeout(ctx, 3*time.Second)

@@ -9,12 +9,14 @@ import (
 	"time"
 
 	"oilfield/internal/scraper"
+	"oilfield/internal/store"
 )
 
 // mockStore implements the Store interface for testing.
 type mockStore struct {
 	data    map[string]string
 	healthy bool
+	history []store.HistoryPoint
 }
 
 func newMockStore(healthy bool) *mockStore {
@@ -46,6 +48,10 @@ func (m *mockStore) GetWithPrefix(_ context.Context, prefix string) (map[string]
 		}
 	}
 	return result, nil
+}
+
+func (m *mockStore) GetHistory(_ context.Context, _, _ string, _ time.Time) ([]store.HistoryPoint, error) {
+	return m.history, nil
 }
 
 func (m *mockStore) IsHealthy(_ context.Context) bool { return m.healthy }
@@ -244,6 +250,50 @@ func TestNews_EmptyReturnsArrayNotNull(t *testing.T) {
 	getJSON(t, srv.URL+"/api/v1/news", &body)
 	if string(body["items"]) == "null" {
 		t.Errorf("news items returned null, want []")
+	}
+}
+
+// ---- /api/v1/history ----
+
+func TestHistory_ReturnsPoints(t *testing.T) {
+	ms := newMockStore(true)
+	t0, _ := time.Parse(time.RFC3339, "2026-06-30T00:00:00Z")
+	t1, _ := time.Parse(time.RFC3339, "2026-07-01T00:00:00Z")
+	ms.history = []store.HistoryPoint{{Price: 82.1, ScrapedAt: t0}, {Price: 83.4, ScrapedAt: t1}}
+
+	srv := newTestServer(ms)
+	defer srv.Close()
+
+	var body struct {
+		Sector string `json:"sector"`
+		Symbol string `json:"symbol"`
+		Points []struct {
+			Price     float64 `json:"price"`
+			ScrapedAt string  `json:"scraped_at"`
+		} `json:"points"`
+	}
+	resp := getJSON(t, srv.URL+"/api/v1/history/crude/WTI", &body)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status: got %d, want 200", resp.StatusCode)
+	}
+	if body.Sector != "crude" || body.Symbol != "WTI" {
+		t.Errorf("echo: got %s/%s", body.Sector, body.Symbol)
+	}
+	if len(body.Points) != 2 || body.Points[1].Price != 83.4 {
+		t.Errorf("points: got %+v", body.Points)
+	}
+}
+
+func TestHistory_UnknownSector(t *testing.T) {
+	srv := newTestServer(newMockStore(true))
+	defer srv.Close()
+	resp, err := http.Get(srv.URL + "/api/v1/history/bitcoin/BTC")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", resp.StatusCode)
 	}
 }
 

@@ -6,19 +6,22 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"oilfield/internal/scraper"
+	"oilfield/internal/store"
 )
 
-// Store is the etcd access surface required by the API handlers.
-// etcdstore.Client satisfies this interface; tests can use a mock.
+// Store is the data access surface required by the API handlers.
+// store.Store satisfies this interface; tests can use a mock.
 type Store interface {
 	Get(ctx context.Context, key string) (string, error)
 	GetJSON(ctx context.Context, key string, dest any) error
 	GetWithPrefix(ctx context.Context, prefix string) (map[string]string, error)
+	GetHistory(ctx context.Context, sector, symbol string, since time.Time) ([]store.HistoryPoint, error)
 	IsHealthy(ctx context.Context) bool
 }
 
@@ -37,6 +40,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/prices/all", s.withCORS(s.pricesAll))
 	mux.HandleFunc("GET /api/v1/prices/{sector}", s.withCORS(s.pricesSector))
 	mux.HandleFunc("GET /api/v1/news", s.withCORS(s.news))
+	mux.HandleFunc("GET /api/v1/history/{sector}/{symbol}", s.withCORS(s.history))
 	mux.HandleFunc("GET /api/v1/cluster", s.withCORS(s.cluster))
 	mux.HandleFunc("GET /api/v1/nodes", s.withCORS(s.nodes))
 	// Preflight handler for cross-origin requests
@@ -197,6 +201,46 @@ func (s *Server) news(w http.ResponseWriter, r *http.Request) {
 		all = []scraper.NewsItem{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": all})
+}
+
+// history returns the price time series for one product: /api/v1/history/{sector}/{symbol}?days=90
+func (s *Server) history(w http.ResponseWriter, r *http.Request) {
+	sector := r.PathValue("sector")
+	symbol := r.PathValue("symbol")
+	allowed := map[string]bool{
+		"crude": true, "natgas": true, "lng": true, "lpg": true, "ngls": true,
+		"electricity": true, "refined": true, "coal": true, "carbon": true,
+	}
+	if !allowed[sector] || symbol == "" {
+		http.Error(w, `{"error":"unknown sector or symbol"}`, http.StatusNotFound)
+		return
+	}
+
+	days := 90
+	if q := r.URL.Query().Get("days"); q != "" {
+		if n, err := strconv.Atoi(q); err == nil && n > 0 && n <= 3650 {
+			days = n
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	since := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+	points, err := s.store.GetHistory(ctx, sector, symbol, since)
+	if err != nil {
+		http.Error(w, `{"error":"history query failed"}`, http.StatusInternalServerError)
+		return
+	}
+	if points == nil {
+		points = []store.HistoryPoint{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"sector": sector,
+		"symbol": symbol,
+		"days":   days,
+		"points": points,
+	})
 }
 
 type nodeStatus struct {
