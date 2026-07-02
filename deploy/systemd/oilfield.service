@@ -1,0 +1,30 @@
+[Unit]
+Description=Oilfield Solo (single-server energy dashboard)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=oilfield
+Group=oilfield
+WorkingDirectory=/opt/oilfield
+EnvironmentFile=/opt/oilfield/env
+ExecStart=/opt/oilfield/bin/oilfield
+Restart=always
+RestartSec=5
+
+# --- resource fencing: crm always has priority on this small shared box ---
+MemoryHigh=150M
+MemoryMax=220M
+CPUWeight=50
+Nice=5
+
+# --- hardening (same posture as crm.service) ---
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/oilfield/data
+
+[Install]
+WantedBy=multi-user.target

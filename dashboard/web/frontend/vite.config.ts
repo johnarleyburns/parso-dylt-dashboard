@@ -3,6 +3,15 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
+  server: {
+    proxy: {
+      '/api': {
+        target: 'https://localhost:8444',
+        changeOrigin: true,
+        secure: false, // self-signed dev cert
+      },
+    },
+  },
   build: {
     target: 'esnext',
     outDir: 'dist',

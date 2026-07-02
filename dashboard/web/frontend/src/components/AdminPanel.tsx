@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Settings, Zap, RefreshCw, Lock } from 'lucide-react'
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? 'https://ctrl.oilfield.parso.guru'
+const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 
 interface AdminResult {
   ok: boolean

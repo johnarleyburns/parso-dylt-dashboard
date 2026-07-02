@@ -18,7 +18,7 @@ interface NodeHealthGridProps {
 }
 
 export default function NodeHealthGrid({ health }: NodeHealthGridProps) {
-  const nodes = ['n1', 'n2', 'n3']
+  const nodes = Object.keys(health).length > 0 ? Object.keys(health) : ['solo']
 
   return (
     <div style={{ display: 'flex', gap: '0.75rem' }}>

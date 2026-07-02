@@ -37,6 +37,13 @@ node_modules/
 dist/
 .npm/
 
+# Single-server: local data + embedded frontend build (copied in by `make web_build`)
+.data/
+app/backend/internal/webui/webroot/assets/
+
+# Compiled binaries
+bin/
+
 # Infra secrets and state
 infra/.env
 infra/state/

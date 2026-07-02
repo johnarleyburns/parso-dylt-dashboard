@@ -209,36 +209,41 @@ func TestPricesSector_EmptyReturnsArray(t *testing.T) {
 
 func TestNews_ReturnsBothSources(t *testing.T) {
 	store := newMockStore(true)
-	store.setJSON("/oilfield/news/eia/items", []scraper.NewsItem{{Title: "EIA item", Source: "EIA"}})
-	store.setJSON("/oilfield/news/iea/items", []scraper.NewsItem{{Title: "IEA item", Source: "IEA"}})
+	store.setJSON("/oilfield/news/eia/items", []scraper.NewsItem{{Title: "EIA item", Source: "EIA", URL: "https://eia.example/1"}})
+	store.setJSON("/oilfield/news/iea/items", []scraper.NewsItem{{Title: "IEA item", Source: "IEA", URL: "https://iea.example/1"}})
 
 	srv := newTestServer(store)
 	defer srv.Close()
 
-	var body map[string][]scraper.NewsItem
+	var body struct {
+		Items []scraper.NewsItem `json:"items"`
+	}
 	resp := getJSON(t, srv.URL+"/api/v1/news", &body)
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("status: got %d, want 200", resp.StatusCode)
 	}
-	if len(body["eia"]) != 1 {
-		t.Errorf("eia news: expected 1, got %d", len(body["eia"]))
+	// The handler merges all /oilfield/news/*/items keys into a single deduped list.
+	if len(body.Items) != 2 {
+		t.Errorf("merged news: expected 2 items, got %d", len(body.Items))
 	}
-	if len(body["iea"]) != 1 {
-		t.Errorf("iea news: expected 1, got %d", len(body["iea"]))
+	sources := map[string]bool{}
+	for _, it := range body.Items {
+		sources[it.Source] = true
+	}
+	if !sources["EIA"] || !sources["IEA"] {
+		t.Errorf("expected both EIA and IEA sources, got %v", sources)
 	}
 }
 
-func TestNews_EmptyReturnsArraysNotNull(t *testing.T) {
+func TestNews_EmptyReturnsArrayNotNull(t *testing.T) {
 	srv := newTestServer(newMockStore(true))
 	defer srv.Close()
 
 	var body map[string]json.RawMessage
 	getJSON(t, srv.URL+"/api/v1/news", &body)
-	for _, src := range []string{"eia", "iea"} {
-		if string(body[src]) == "null" {
-			t.Errorf("news source %q returned null, want []", src)
-		}
+	if string(body["items"]) == "null" {
+		t.Errorf("news items returned null, want []")
 	}
 }
 

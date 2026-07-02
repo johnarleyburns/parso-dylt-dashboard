@@ -23,8 +23,8 @@ import type { AllPrices, NewsResponse, AllHealth, NodeHealth } from './types'
 
 type ViewMode = 'prices' | '3d' | '2d' | 'table'
 
-// Runtime nodes for prices/news — raced in parallel; first 2xx wins.
-// Override with VITE_RUNTIME_NODES="https://n1.example.com,https://n2.example.com,...".
+// Single-server build: the API is served from the same origin as this frontend.
+// Override with VITE_RUNTIME_NODES="https://host" (comma-separated) for multi-node dev.
 const RUNTIME_NODES: { name: string; base: string }[] = (() => {
   const env = import.meta.env.VITE_RUNTIME_NODES as string | undefined
   if (env) {
@@ -33,11 +33,7 @@ const RUNTIME_NODES: { name: string; base: string }[] = (() => {
       return { name: new URL(base).hostname.split('.')[0], base }
     })
   }
-  return [
-    { name: 'n1', base: 'https://n1.oilfield.parso.guru' },
-    { name: 'n2', base: 'https://n2.oilfield.parso.guru' },
-    { name: 'n3', base: 'https://n3.oilfield.parso.guru' },
-  ]
+  return [{ name: 'solo', base: '' }]
 })()
 
 const PRICE_INTERVAL_MS  = 30_000
@@ -297,7 +293,7 @@ export default function App() {
               >
                 <Shield size={11} /> CTRL
               </button>
-              <AdminPanel nodeNames={['n1', 'n2', 'n3']} />
+              <AdminPanel nodeNames={['solo']} />
             </div>
           </div>
         </header>
@@ -347,7 +343,7 @@ export default function App() {
             >
               <Shield size={12} /> CTRL
             </button>
-            <AdminPanel nodeNames={['n1', 'n2', 'n3']} />
+            <AdminPanel nodeNames={['solo']} />
           </div>
         </header>
       )}

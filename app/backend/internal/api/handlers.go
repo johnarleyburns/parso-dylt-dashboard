@@ -38,6 +38,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/prices/{sector}", s.withCORS(s.pricesSector))
 	mux.HandleFunc("GET /api/v1/news", s.withCORS(s.news))
 	mux.HandleFunc("GET /api/v1/cluster", s.withCORS(s.cluster))
+	mux.HandleFunc("GET /api/v1/nodes", s.withCORS(s.nodes))
 	// Preflight handler for cross-origin requests
 	mux.HandleFunc("OPTIONS /api/v1/", s.preflight)
 }
@@ -203,6 +204,62 @@ type nodeStatus struct {
 	Status    string `json:"status"`
 	IP        string `json:"ip"`
 	Provider  string `json:"provider"`
+}
+
+// nodeInfo matches the WorldMap/AdminConsole NodeInfo shape in the frontend.
+type nodeInfo struct {
+	Name        string  `json:"name"`
+	Lat         float64 `json:"lat"`
+	Lon         float64 `json:"lon"`
+	City        string  `json:"city"`
+	Country     string  `json:"country"`
+	Provider    string  `json:"provider"`
+	Role        string  `json:"role"`
+	Status      string  `json:"status"`
+	EtcdHealthy bool    `json:"etcd_healthy"`
+}
+
+// nodes returns the single-server topology (one element) for the admin console.
+// Geo/labels come from NODE_GEO (JSON) or sensible IONOS defaults.
+func (s *Server) nodes(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	healthy := s.store.IsHealthy(ctx)
+	status := "ok"
+	if !healthy {
+		status = "degraded"
+	}
+
+	n := nodeInfo{
+		Name:        s.nodeName,
+		Lat:         52.52,
+		Lon:         13.405,
+		City:        "Berlin",
+		Country:     "DE",
+		Provider:    s.provider,
+		Role:        "runtime",
+		Status:      status,
+		EtcdHealthy: healthy,
+	}
+	if raw := os.Getenv("NODE_GEO"); raw != "" {
+		var override nodeInfo
+		if json.Unmarshal([]byte(raw), &override) == nil {
+			if override.City != "" {
+				n.City = override.City
+			}
+			if override.Country != "" {
+				n.Country = override.Country
+			}
+			if override.Lat != 0 {
+				n.Lat = override.Lat
+			}
+			if override.Lon != 0 {
+				n.Lon = override.Lon
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, []nodeInfo{n})
 }
 
 func (s *Server) cluster(w http.ResponseWriter, r *http.Request) {

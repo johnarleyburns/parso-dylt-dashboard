@@ -5,7 +5,7 @@ import NodeGrid from './NodeGrid'
 import NodeDetailDrawer from './NodeDetailDrawer'
 import MapErrorBoundary from './MapErrorBoundary'
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? 'https://ctrl.oilfield.parso.guru'
+const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 const REFRESH_MS = 15_000
 
 interface Props {

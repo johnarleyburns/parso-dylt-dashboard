@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { X, RefreshCw } from 'lucide-react'
 import type { NodeInfo } from './WorldMap'
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? 'https://ctrl.oilfield.parso.guru'
+const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 
 interface NodeMetrics {
   load1: number
