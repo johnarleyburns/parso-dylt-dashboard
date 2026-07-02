@@ -156,7 +156,7 @@ export default function PriceHistoryModal({ sector, symbol, name, unit, onClose 
         </div>
 
         {/* Chart */}
-        <div style={{ flex: 1, minHeight: 320, padding: '0.75rem 0.5rem 0.5rem' }}>
+        <div style={{ flex: 1, minHeight: 320, padding: '0.75rem 0.5rem 0.5rem', display: 'flex', flexDirection: 'column' }}>
           {loading ? (
             <Centered>Loading history…</Centered>
           ) : error ? (
@@ -164,37 +164,39 @@ export default function PriceHistoryModal({ sector, symbol, name, unit, onClose 
           ) : chartData.length === 0 ? (
             <Centered>No history yet — data accumulates as the scraper runs.</Centered>
           ) : (
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData} margin={{ top: 8, right: 20, left: 0, bottom: 4 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                <XAxis
-                  dataKey="t"
-                  type="number"
-                  scale="time"
-                  domain={['dataMin', 'dataMax']}
-                  tickFormatter={fmtDate}
-                  tick={{ fill: '#64748b', fontSize: 10 }}
-                  tickLine={false}
-                  minTickGap={40}
-                />
-                <YAxis
-                  domain={yDomain}
-                  tickFormatter={(v: number) => (v >= 100 ? v.toFixed(0) : v.toFixed(2))}
-                  tick={{ fill: '#64748b', fontSize: 10 }}
-                  tickLine={false}
-                  axisLine={false}
-                  width={58}
-                />
-                <Tooltip
-                  contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 4, fontSize: 11 }}
-                  labelStyle={{ color: '#94a3b8' }}
-                  itemStyle={{ color: '#e2e8f0' }}
-                  labelFormatter={(t) => new Date(t as number).toLocaleString('en-US', { timeZone: 'UTC', hour12: false })}
-                  formatter={(v) => [Number(v).toLocaleString('en-US', { maximumFractionDigits: 4 }) + (unit ? ` ${unit}` : ''), 'Price']}
-                />
-                <Line type="monotone" dataKey="price" stroke={color} dot={false} strokeWidth={1.75} connectNulls />
-              </LineChart>
-            </ResponsiveContainer>
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={chartData} margin={{ top: 8, right: 20, left: 0, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                  <XAxis
+                    dataKey="t"
+                    type="number"
+                    scale="time"
+                    domain={['dataMin', 'dataMax']}
+                    tickFormatter={fmtDate}
+                    tick={{ fill: '#64748b', fontSize: 10 }}
+                    tickLine={false}
+                    minTickGap={40}
+                  />
+                  <YAxis
+                    domain={yDomain}
+                    tickFormatter={(v: number) => (v >= 100 ? v.toFixed(0) : v.toFixed(2))}
+                    tick={{ fill: '#64748b', fontSize: 10 }}
+                    tickLine={false}
+                    axisLine={false}
+                    width={58}
+                  />
+                  <Tooltip
+                    contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 4, fontSize: 11 }}
+                    labelStyle={{ color: '#94a3b8' }}
+                    itemStyle={{ color: '#e2e8f0' }}
+                    labelFormatter={(t) => new Date(t as number).toLocaleString('en-US', { timeZone: 'UTC', hour12: false })}
+                    formatter={(v) => [Number(v).toLocaleString('en-US', { maximumFractionDigits: 4 }) + (unit ? ` ${unit}` : ''), 'Price']}
+                  />
+                  <Line type="monotone" dataKey="price" stroke={color} dot={false} strokeWidth={1.75} connectNulls />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
           )}
         </div>
       </div>
